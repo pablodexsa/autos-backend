@@ -1,21 +1,20 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne } from 'typeorm';
 import { Vehicle } from '../vehicles/vehicle.entity';
 
-@Entity('sales')
+@Entity()
 export class Sale {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @ManyToOne(() => Vehicle)
-  @JoinColumn()
+  @ManyToOne(() => Vehicle, (vehicle) => vehicle.sales)
   vehicle: Vehicle;
 
   @Column()
-  precioVenta: number;
+  saleDate: string;
 
-  @Column({ type: 'date' })
-  fechaVenta: Date;
+  @Column('decimal')
+  price: number;
 
-  @Column()
-  cliente: string;
+  @Column({ nullable: true })
+  documentPath?: string;
 }

@@ -1,18 +1,25 @@
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Purchase } from './purchase.entity';
+
+export interface Purchase {
+  id: number;
+  vehicleId: number;             // ID del vehículo comprado
+  purchaseDate: string;          // Fecha (YYYY-MM-DD)
+  price: number;                  // Precio
+  documentPath?: string | null;   // Documento opcional
+}
 
 @Injectable()
 export class PurchasesService {
-  constructor(@InjectRepository(Purchase) private repo: Repository<Purchase>) {}
+  private purchases: Purchase[] = [];
 
-  create(data: Partial<Purchase>) {
-    const purchase = this.repo.create(data);
-    return this.repo.save(purchase);
+  create(data: Omit<Purchase, 'id'>) {
+    const id = this.purchases.length + 1;
+    const purchase: Purchase = { id, ...data };
+    this.purchases.push(purchase);
+    return purchase;
   }
 
-  findAll() {
-    return this.repo.find({ relations: ['vehicle'] });
+  findAll(): Purchase[] {
+    return this.purchases;
   }
 }

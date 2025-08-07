@@ -1,18 +1,32 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
+import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Purchase } from './purchase.entity';
 import { Vehicle } from '../vehicles/vehicle.entity';
 
-@Entity('purchases')
-export class Purchase {
-  @PrimaryGeneratedColumn()
-  id: number;
+@Injectable()
+export class PurchasesService {
+  constructor(
+    @InjectRepository(Purchase)
+    private purchasesRepository: Repository<Purchase>,
+    @InjectRepository(Vehicle)
+    private vehiclesRepository: Repository<Vehicle>,
+  ) {}
 
-  @ManyToOne(() => Vehicle)
-  @JoinColumn()
-  vehicle: Vehicle;
+  async create(data: { vehicleId: number; purchaseDate: string; price: number; documentPath?: string }) {
+    const vehicle = await this.vehiclesRepository.findOneBy({ id: data.vehicleId });
+    if (!vehicle) throw new Error('Vehículo no encontrado');
 
-  @Column()
-  precioCompra: number;
+    const purchase = this.purchasesRepository.create({
+      vehicle,
+      purchaseDate: data.purchaseDate,
+      price: data.price,
+      documentPath: data.documentPath || null,
+    });
+    return this.purchasesRepository.save(purchase);
+  }
 
-  @Column({ type: 'date' })
-  fechaCompra: Date;
+  findAll() {
+    return this.purchasesRepository.find({ relations: ['vehicle'] });
+  }
 }

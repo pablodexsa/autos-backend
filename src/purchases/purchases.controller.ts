@@ -1,13 +1,26 @@
-import { Controller, Get, Post, Body } from '@nestjs/common';
+import { Controller, Get, Post, Body, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { PurchasesService } from './purchases.service';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
 
 @Controller('purchases')
 export class PurchasesController {
-  constructor(private purchasesService: PurchasesService) {}
+  constructor(private readonly purchasesService: PurchasesService) {}
 
   @Post()
-  create(@Body() body: any) {
-    return this.purchasesService.create(body);
+  @UseInterceptors(FileInterceptor('document', {
+    storage: diskStorage({
+      destination: './uploads',
+      filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`)
+    })
+  }))
+  create(@Body() body: any, @UploadedFile() file?: Express.Multer.File) {
+    return this.purchasesService.create({
+      vehicleId: Number(body.vehicleId),
+      purchaseDate: body.purchaseDate, // nombre unificado
+      price: Number(body.price),
+      documentPath: file ? `uploads/${file.filename}` : null
+    });
   }
 
   @Get()

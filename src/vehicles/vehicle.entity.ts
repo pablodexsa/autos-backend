@@ -1,22 +1,24 @@
-import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, OneToMany } from 'typeorm';
+import { Purchase } from '../purchases/purchase.entity';
+import { Sale } from '../sales/sale.entity';
 
-@Entity('vehicles')
+@Entity()
 export class Vehicle {
   @PrimaryGeneratedColumn()
   id: number;
 
   @Column()
-  marca: string;
+  brand: string;
 
   @Column()
-  modelo: string;
+  model: string;
 
   @Column()
-  anio: number;
+  year: number;
 
-  @Column({ nullable: true })
-  precio: number;
+  @OneToMany(() => Purchase, (purchase) => purchase.vehicle)
+  purchases: Purchase[];
 
-  @Column({ default: true })
-  disponible: boolean;
+  @OneToMany(() => Sale, (sale) => sale.vehicle)
+  sales: Sale[];
 }
