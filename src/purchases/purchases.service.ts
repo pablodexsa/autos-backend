@@ -1,25 +1,33 @@
 import { Injectable } from '@nestjs/common';
-
-export interface Purchase {
-  id: number;
-  vehicleId: number;             // ID del vehículo comprado
-  purchaseDate: string;          // Fecha (YYYY-MM-DD)
-  price: number;                  // Precio
-  documentPath?: string | null;   // Documento opcional
-}
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Purchase } from './purchase.entity';
+import { Vehicle } from '../vehicles/vehicle.entity';
 
 @Injectable()
 export class PurchasesService {
-  private purchases: Purchase[] = [];
+  constructor(
+    @InjectRepository(Purchase)
+    private purchasesRepository: Repository<Purchase>,
+    @InjectRepository(Vehicle)
+    private vehiclesRepository: Repository<Vehicle>,
+  ) {}
 
-  create(data: Omit<Purchase, 'id'>) {
-    const id = this.purchases.length + 1;
-    const purchase: Purchase = { id, ...data };
-    this.purchases.push(purchase);
-    return purchase;
+  async create(data: { vehicleId: number; purchaseDate: string; price: number; documentPath?: string | null }) {
+    const vehicle = await this.vehiclesRepository.findOneBy({ id: data.vehicleId });
+    if (!vehicle) throw new Error('Vehículo no encontrado');
+
+    const purchase = this.purchasesRepository.create({
+      vehicle,
+      purchaseDate: data.purchaseDate,
+      price: data.price,
+      documentPath: data.documentPath || null,
+    });
+
+    return this.purchasesRepository.save(purchase);
   }
 
-  findAll(): Purchase[] {
-    return this.purchases;
+  findAll() {
+    return this.purchasesRepository.find({ relations: ['vehicle'] });
   }
 }

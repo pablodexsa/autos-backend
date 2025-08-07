@@ -10,7 +10,7 @@ export class VehiclesService {
     private vehiclesRepository: Repository<Vehicle>,
   ) {}
 
-  create(data: Omit<Vehicle, 'id'>) {
+  create(data: Partial<Vehicle>) {
     const vehicle = this.vehiclesRepository.create(data);
     return this.vehiclesRepository.save(vehicle);
   }

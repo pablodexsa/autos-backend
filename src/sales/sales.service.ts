@@ -13,7 +13,7 @@ export class SalesService {
     private vehiclesRepository: Repository<Vehicle>,
   ) {}
 
-  async create(data: { vehicleId: number; saleDate: string; price: number; documentPath?: string }) {
+  async create(data: { vehicleId: number; saleDate: string; price: number; documentPath?: string | null }) {
     const vehicle = await this.vehiclesRepository.findOneBy({ id: data.vehicleId });
     if (!vehicle) throw new Error('Vehículo no encontrado');
 
@@ -23,6 +23,7 @@ export class SalesService {
       price: data.price,
       documentPath: data.documentPath || null,
     });
+
     return this.salesRepository.save(sale);
   }
 

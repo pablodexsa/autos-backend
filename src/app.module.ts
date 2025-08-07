@@ -1,4 +1,5 @@
-import { Module } from '@nestjs/common';
+﻿import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { VehiclesModule } from './vehicles/vehicles.module';
 import { PurchasesModule } from './purchases/purchases.module';
@@ -9,15 +10,17 @@ import { Sale } from './sales/sale.entity';
 
 @Module({
   imports: [
+    ConfigModule.forRoot({ isGlobal: true }),
     TypeOrmModule.forRoot({
       type: 'postgres',
-      host: 'localhost',
-      port: 5432,
-      username: 'postgres', // tu usuario
-      password: 'tu_password', // tu password
-      database: 'autos',
+      host: process.env.DB_HOST,
+      port: parseInt(process.env.DB_PORT || '5432', 10), // ✅ valor por defecto
+      username: process.env.DB_USER,
+      password: process.env.DB_PASS,
+      database: process.env.DB_NAME,
       entities: [Vehicle, Purchase, Sale],
-      synchronize: true, // crea/actualiza tablas autom�ticamente
+      synchronize: true,
+      ssl: { rejectUnauthorized: false },
     }),
     VehiclesModule,
     PurchasesModule,
