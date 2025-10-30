@@ -1,30 +1,37 @@
-import { Controller, Get, Post, Body, UploadedFile, UseInterceptors } from '@nestjs/common';
+﻿import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Delete,
+  ParseIntPipe,
+} from '@nestjs/common';
 import { PurchasesService } from './purchases.service';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
+import { CreatePurchaseDto } from './dto/create-purchase.dto';
+import { UpdatePurchaseDto } from './dto/update-purchase.dto';
 
 @Controller('purchases')
 export class PurchasesController {
   constructor(private readonly purchasesService: PurchasesService) {}
 
-  @Post()
-  @UseInterceptors(FileInterceptor('document', {
-    storage: diskStorage({
-      destination: './uploads',
-      filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`)
-    })
-  }))
-  create(@Body() body: any, @UploadedFile() file?: Express.Multer.File) {
-    return this.purchasesService.create({
-      vehicleId: Number(body.vehicleId),
-      purchaseDate: body.purchaseDate, // nombre unificado
-      price: Number(body.price),
-      documentPath: file ? `uploads/${file.filename}` : null
-    });
-  }
-
   @Get()
   findAll() {
     return this.purchasesService.findAll();
+  }
+
+  @Get(':id')
+  findOne(@Param('id', ParseIntPipe) id: number) {
+    return this.purchasesService.findOne(id);
+  }
+
+  @Post()
+  create(@Body() dto: CreatePurchaseDto) {
+    return this.purchasesService.create(dto);
+  }
+
+  @Delete(':id')
+  remove(@Param('id', ParseIntPipe) id: number) {
+    return this.purchasesService.remove(id);
   }
 }

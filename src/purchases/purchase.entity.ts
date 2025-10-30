@@ -1,20 +1,30 @@
-﻿import { Entity, PrimaryGeneratedColumn, Column, ManyToOne } from 'typeorm';
+﻿import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  ManyToOne,
+  CreateDateColumn,
+  JoinColumn,
+} from 'typeorm';
 import { Vehicle } from '../vehicles/vehicle.entity';
+import { Client } from '../clients/entities/client.entity';
 
-@Entity()
+@Entity({ name: 'purchases' })
 export class Purchase {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @ManyToOne(() => Vehicle, (vehicle) => vehicle.purchases, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Vehicle, { eager: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'vehicle_id' })
   vehicle: Vehicle;
 
-  @Column()
-  purchaseDate: string;
+  @ManyToOne(() => Client, { eager: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'client_id' })
+  client: Client;
 
-  @Column('decimal')
-  price: number;
+  @Column('decimal', { precision: 12, scale: 2 })
+  amount: number; // 💰 precio de la compra
 
-  @Column({ nullable: true })
-  documentPath?: string | null; // ? permite null
+  @CreateDateColumn()
+  createdAt: Date;
 }
