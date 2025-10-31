@@ -49,32 +49,33 @@ import { Version } from './versions/version.entity';
     ReservationsModule,
 
     // ✅ Conexión PostgreSQL (Neon.tech)
-    TypeOrmModule.forRoot({
-      type: 'postgres',
-      host: process.env.DB_HOST || 'ep-gentle-poetry-acsrhj0f-pooler.sa-east-1.aws.neon.tech',
-      port: Number(process.env.DB_PORT) || 5432,
-      username: process.env.DB_USER || 'neondb_owner',
-      password: process.env.DB_PASS || 'npg_LNxq5nAcovp7',
-      database: process.env.DB_NAME || 'neondb',
-      ssl: { rejectUnauthorized: false }, // necesario para Neon
-      synchronize: true,
-      autoLoadEntities: true,
-      entities: [
-        User,
-        Role,
-        Vehicle,
-        Client,
-        Sale,
-        Budget,
-        Purchase,
-        Installment,
-        InstallmentPayment,
-        InstallmentSetting,
-	Brand,
-	Model,
-	Version,
-      ],
-    }),
+TypeOrmModule.forRoot({
+  type: 'postgres',
+  host: process.env.DB_HOST || 'ep-gentle-poetry-acsrhj0f-pooler.sa-east-1.aws.neon.tech',
+  port: Number(process.env.DB_PORT) || 5432,
+  username: process.env.DB_USER || 'neondb_owner',
+  password: process.env.DB_PASS || 'npg_LNxq5nAcovp7',
+  database: process.env.DB_NAME || 'neondb',
+  ssl: { rejectUnauthorized: false }, // 🔥 requerido siempre con Neon
+  synchronize: true,
+  autoLoadEntities: true,
+  entities: [
+    User,
+    Role,
+    Vehicle,
+    Client,
+    Sale,
+    Budget,
+    Purchase,
+    Installment,
+    InstallmentPayment,
+    InstallmentSetting,
+    Brand,
+    Model,
+    Version,
+  ],
+}),
+
 
     // 📁 Archivos estáticos (uploads)
     ServeStaticModule.forRoot({
