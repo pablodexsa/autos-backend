@@ -20,27 +20,16 @@ async function bootstrap() {
   app.use(json({ limit: '10mb' }));
   app.use(urlencoded({ extended: true, limit: '10mb' }));
 
-  // ✅ CORS compatible local + Render
+  // ✅ CORS compatible local + Render (forma estable)
   const allowedOrigins = [
     'http://localhost:5173', // entorno local (Vite)
     'https://autos-frontend.onrender.com', // frontend desplegado en Render
   ];
 
   app.enableCors({
-    origin: (origin, callback) => {
-      // Permite peticiones sin "origin" (por ejemplo, desde herramientas locales o tests)
-      if (!origin) {
-        return callback(null, true);
-      }
-
-      if (allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        console.warn(`🚫 CORS bloqueado para: ${origin}`);
-        callback(new Error('CORS bloqueado para este origen: ' + origin));
-      }
-    },
+    origin: allowedOrigins,
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
   });
 
