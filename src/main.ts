@@ -26,12 +26,12 @@ async function bootstrap() {
     'https://autos-frontend.onrender.com', // frontend desplegado en Render
   ];
 
-  app.enableCors({
-    origin: allowedOrigins,
-    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-    credentials: true,
-  });
+app.enableCors({
+  origin: ['http://localhost:5173', 'https://autos-frontend.onrender.com'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+});
 
   // ✅ Prefijo global de rutas
   app.setGlobalPrefix('api');
