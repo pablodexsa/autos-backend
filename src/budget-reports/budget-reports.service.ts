@@ -55,12 +55,20 @@ export class BudgetReportsService {
     report.vehicle = vehicle;
     report.client = client;
     if (seller) report.seller = seller;
-    report.paymentType = dto.paymentType;
-    if (dto.installments !== undefined) report.installments = dto.installments;
-    report.listPrice = dto.listPrice;
-    report.finalPrice = dto.finalPrice;
-    if (dto.installmentValue !== undefined) report.installmentValue = dto.installmentValue;
-    if (dto.downPayment !== undefined) report.downPayment = dto.downPayment;
+
+// 🔗 Vincular presupuesto original
+report.budgetId = dto.budgetId ?? undefined;
+
+// 💰 Cargar datos numéricos (asegurando tipo number)
+report.paymentType = dto.paymentType;
+report.installments = dto.installments ?? undefined;
+report.listPrice = Number(dto.listPrice) || 0;
+report.finalPrice = Number(dto.finalPrice) || 0;
+report.installmentValue =
+  dto.installmentValue != null ? Number(dto.installmentValue) : undefined;
+report.downPayment =
+  dto.downPayment != null ? Number(dto.downPayment) : undefined;
+
 
     try {
       const saved = await this.repo.save(report);

@@ -24,7 +24,7 @@ import { ModelsModule } from './models/models.module';
 import { VersionsModule } from './versions/versions.module';
 import { InstallmentSettingsModule } from './installment-settings/installment-settings.module';
 import { BudgetReportsModule } from './budget-reports/budget-reports.module';
-
+import { LoanRatesModule } from './loan-rates/loan-rates.module';
 
 // 📦 Entidades
 import { User } from './users/user.entity';
@@ -99,6 +99,7 @@ TypeOrmModule.forRoot({
     ModelsModule,
     VersionsModule,
     BudgetReportsModule,
+    LoanRatesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -1,3 +1,4 @@
+﻿// src/versions/versions.service.ts
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -13,15 +14,26 @@ export class VersionsService {
     @InjectRepository(Model) private modelRepo: Repository<Model>,
   ) {}
 
-  async create(dto: CreateVersionDto) {
-    const model = await this.modelRepo.findOne({ where: { id: dto.modelId }, relations: ['brand'] });
+  // ✅ Crear versión asociada a un modelo
+  async create(modelId: number, dto: CreateVersionDto) {
+    const model = await this.modelRepo.findOne({ where: { id: modelId } });
     if (!model) throw new NotFoundException('Model not found');
-    const v = this.repo.create({ name: dto.name, model });
-    return this.repo.save(v);
+    const version = this.repo.create({ name: dto.name, model });
+    return this.repo.save(version);
   }
 
+  // ✅ Listar versiones por modelo (GET /models/:modelId/versions)
+  async findByModel(modelId: number) {
+    return this.repo.find({
+      where: { model: { id: modelId } },
+      order: { name: 'ASC' },
+    });
+  }
+
+  // === Métodos generales ===
   findAll(modelId?: number) {
-    const qb = this.repo.createQueryBuilder('v')
+    const qb = this.repo
+      .createQueryBuilder('v')
       .leftJoinAndSelect('v.model', 'm')
       .leftJoinAndSelect('m.brand', 'b')
       .orderBy('b.name', 'ASC')
@@ -32,7 +44,10 @@ export class VersionsService {
   }
 
   async findOne(id: number) {
-    const v = await this.repo.findOne({ where: { id }, relations: ['model', 'model.brand'] });
+    const v = await this.repo.findOne({
+      where: { id },
+      relations: ['model', 'model.brand'],
+    });
     if (!v) throw new NotFoundException('Version not found');
     return v;
   }

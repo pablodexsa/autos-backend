@@ -1,4 +1,4 @@
-import {
+﻿import {
   Entity,
   PrimaryGeneratedColumn,
   Column,
@@ -14,6 +14,10 @@ import { User } from '../users/user.entity';
 export class BudgetReport {
   @PrimaryGeneratedColumn()
   id: number;
+
+  // 🔗 ID del presupuesto original (budgets.id)
+  @Column({ type: 'int', nullable: true })
+  budgetId?: number;
 
   @ManyToOne(() => Vehicle, { eager: true })
   @JoinColumn({ name: 'vehicleId' })
@@ -33,16 +37,17 @@ export class BudgetReport {
   @Column({ type: 'int', nullable: true })
   installments?: number;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2 })
+  // ⬆️ Subí precisión para evitar “numeric field overflow”
+  @Column({ type: 'decimal', precision: 18, scale: 2 })
   listPrice: number;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2 })
+  @Column({ type: 'decimal', precision: 18, scale: 2 })
   finalPrice: number;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  @Column({ type: 'decimal', precision: 18, scale: 2, nullable: true })
   installmentValue?: number;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  @Column({ type: 'decimal', precision: 18, scale: 2, nullable: true })
   downPayment?: number;
 
   @CreateDateColumn()

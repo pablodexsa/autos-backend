@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+﻿import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Model } from './model.entity';
@@ -13,15 +13,26 @@ export class ModelsService {
     @InjectRepository(Brand) private brandRepo: Repository<Brand>,
   ) {}
 
-  async create(dto: CreateModelDto) {
-    const brand = await this.brandRepo.findOne({ where: { id: dto.brandId } });
+  // ✅ Crea modelo directamente con brandId (desde /brands/:brandId/models)
+  async create(brandId: number, dto: CreateModelDto) {
+    const brand = await this.brandRepo.findOne({ where: { id: brandId } });
     if (!brand) throw new NotFoundException('Brand not found');
     const m = this.repo.create({ name: dto.name, brand });
     return this.repo.save(m);
   }
 
+  // ✅ Listar modelos por marca (para /brands/:brandId/models)
+  async findByBrand(brandId: number) {
+    return this.repo.find({
+      where: { brand: { id: brandId } },
+      order: { name: 'ASC' },
+    });
+  }
+
+  // Mantengo tu findAll() para compatibilidad general
   findAll(brandId?: number) {
-    const qb = this.repo.createQueryBuilder('m')
+    const qb = this.repo
+      .createQueryBuilder('m')
       .leftJoinAndSelect('m.brand', 'b')
       .orderBy('b.name', 'ASC')
       .addOrderBy('m.name', 'ASC');
@@ -33,7 +44,7 @@ export class ModelsService {
     const m = await this.repo.findOne({ where: { id }, relations: ['brand'] });
     if (!m) throw new NotFoundException('Model not found');
     return m;
-    }
+  }
 
   async update(id: number, dto: UpdateModelDto) {
     const m = await this.findOne(id);

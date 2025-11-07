@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+﻿import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BudgetReport } from './budget-report.entity';
 import { BudgetReportsService } from './budget-reports.service';
@@ -11,5 +11,6 @@ import { User } from '../users/user.entity';
   imports: [TypeOrmModule.forFeature([BudgetReport, Vehicle, Client, User])],
   providers: [BudgetReportsService],
   controllers: [BudgetReportsController],
+  exports: [BudgetReportsService], // 👈 IMPORTANTE para que otros módulos lo usen
 })
 export class BudgetReportsModule {}

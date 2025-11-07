@@ -38,32 +38,33 @@ export class ReservationsController {
     return this.reservationsService.findOne(id);
   }
 
-  // 🔹 Crear una nueva reserva (genera PDF automáticamente)
+  // 🔹 Crear una nueva reserva (PDF con nomenclatura real, sin alertas)
   @Post()
   @ApiOperation({ summary: 'Crear una nueva reserva y generar PDF' })
   async create(@Body() dto: any, @Res() res: Response) {
     try {
       const created = await this.reservationsService.create(dto);
-
-      // 🔸 Generar PDF inmediatamente después de crear la reserva
       const buffer = await this.reservationsService.getPdf(created.id);
-      const fileName = `reserva_${created.id}.pdf`;
 
-      // Guardar PDF en carpeta local
-      const filePath = path.join(
-        __dirname,
-        '../../uploads/reservations',
-        fileName,
-      );
-      if (!fs.existsSync(path.dirname(filePath))) {
-        fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      const dir = path.join(__dirname, '../../uploads/reservations', String(created.id));
+      let fileName = `Reserva-${created.id}.pdf`;
+
+      if (fs.existsSync(dir)) {
+        const pdfFiles = fs.readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.pdf'));
+        if (pdfFiles.length > 0) fileName = pdfFiles[0];
       }
-      fs.writeFileSync(filePath, buffer);
+
+      const filePath = path.join(dir, fileName);
+      if (!fs.existsSync(filePath)) {
+        fs.writeFileSync(filePath, buffer);
+      }
+
+      console.log(`✅ Reserva creada y PDF guardado como ${fileName}`);
 
       res.status(201).json({
-        message: 'Reserva creada correctamente',
         id: created.id,
-        pdfPath: `/uploads/reservations/${fileName}`,
+        pdfName: fileName,
+        pdfPath: `/uploads/reservations/${created.id}/${fileName}`,
       });
     } catch (error) {
       console.error('Error al crear la reserva:', error);
@@ -114,23 +115,52 @@ export class ReservationsController {
     }
   }
 
-  // 🔹 Descargar PDF de reserva
+  // 🔹 Descargar PDF de reserva con nombre correcto
   @Get(':id/pdf')
-  @ApiOperation({ summary: 'Descargar comprobante de reserva en PDF' })
+  @ApiOperation({ summary: 'Descargar comprobante de reserva en PDF con nombre real' })
   async pdf(@Param('id', ParseIntPipe) id: number, @Res() res: Response) {
     try {
       const buffer = await this.reservationsService.getPdf(id);
-      const fileName = `reserva_${id}.pdf`;
+      const dir = path.join(__dirname, '../../uploads/reservations', String(id));
+      let fileName = `Reserva-${id}.pdf`;
 
-      res.set({
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename=${fileName}`,
-      });
+      if (fs.existsSync(dir)) {
+        const pdfs = fs.readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.pdf'));
+        if (pdfs.length > 0) fileName = pdfs[0];
+      }
+
+      console.log(`📤 Enviando archivo real: ${fileName}`);
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${encodeURIComponent(fileName)}"`,
+      );
+
       res.send(buffer);
     } catch (error) {
       console.error('Error al generar PDF de la reserva:', error);
       throw new HttpException(
         'Error al generar el PDF de la reserva',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  // 🔹 NUEVO ENDPOINT: Forzar expiración manual de reservas
+  @Post('expire')
+  @ApiOperation({ summary: 'Marcar manualmente las reservas vencidas y liberar vehículos' })
+  async forceExpire() {
+    try {
+      const result = await this.reservationsService.forceExpire();
+      return {
+        message: `Proceso de expiración ejecutado correctamente.`,
+        result,
+      };
+    } catch (error) {
+      console.error('Error al forzar expiración:', error);
+      throw new HttpException(
+        'Error al ejecutar la expiración de reservas',
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

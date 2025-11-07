@@ -1,28 +1,52 @@
-﻿import { Controller, Get, Post, Body, Param, Query, NotFoundException } from '@nestjs/common';
+﻿// src/models/models.controller.ts
+import { Controller, Get, Post, Patch, Delete, Param, Body } from '@nestjs/common';
 import { ModelsService } from './models.service';
 import { CreateModelDto } from './dto/create-model.dto';
+import { UpdateModelDto } from './dto/update-model.dto';
+import { VersionsService } from '../versions/versions.service';
+import { CreateVersionDto } from '../versions/dto/create-version.dto';
 
 @Controller('models')
 export class ModelsController {
-  constructor(private readonly service: ModelsService) {}
+  constructor(
+    private readonly service: ModelsService,
+    private readonly versionsService: VersionsService, // ✅ nuevo
+  ) {}
 
-  // ✅ Crear un modelo nuevo
   @Post()
-  create(@Body() dto: CreateModelDto) {
-    return this.service.create(dto);
+  async create(@Body() dto: CreateModelDto) {
+    if (!dto.brandId) throw new Error('brandId is required to create model');
+    return this.service.create(dto.brandId, dto);
   }
 
-  // ✅ Obtener todos los modelos o filtrados por marca
   @Get()
-  async findAll(@Query('brandId') brandId?: number) {
-    return this.service.findAll(brandId ? +brandId : undefined);
+  findAll() {
+    return this.service.findAll();
   }
 
-  // ✅ Obtener un modelo específico por id
   @Get(':id')
-  async findOne(@Param('id') id: number) {
-    const model = await this.service.findOne(+id);
-    if (!model) throw new NotFoundException('Model not found');
-    return model;
+  findOne(@Param('id') id: string) {
+    return this.service.findOne(+id);
+  }
+
+  @Patch(':id')
+  update(@Param('id') id: string, @Body() dto: UpdateModelDto) {
+    return this.service.update(+id, dto);
+  }
+
+  @Delete(':id')
+  remove(@Param('id') id: string) {
+    return this.service.remove(+id);
+  }
+
+  // ✅ NUEVAS rutas para versiones relacionadas
+  @Get(':modelId/versions')
+  findVersions(@Param('modelId') modelId: string) {
+    return this.versionsService.findByModel(+modelId);
+  }
+
+  @Post(':modelId/versions')
+  createVersion(@Param('modelId') modelId: string, @Body() dto: CreateVersionDto) {
+    return this.versionsService.create(+modelId, dto);
   }
 }

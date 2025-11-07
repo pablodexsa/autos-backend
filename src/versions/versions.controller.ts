@@ -1,4 +1,5 @@
-﻿import { Controller, Get, Post, Patch, Delete, Param, Body, Query, NotFoundException } from '@nestjs/common';
+﻿// src/versions/versions.controller.ts
+import { Controller, Get, Post, Patch, Delete, Param, Body } from '@nestjs/common';
 import { VersionsService } from './versions.service';
 import { CreateVersionDto } from './dto/create-version.dto';
 import { UpdateVersionDto } from './dto/update-version.dto';
@@ -7,20 +8,17 @@ import { UpdateVersionDto } from './dto/update-version.dto';
 export class VersionsController {
   constructor(private readonly service: VersionsService) {}
 
+  // ✅ Crear versión (debe incluir modelId en el body)
   @Post()
-  create(@Body() dto: CreateVersionDto) {
-    return this.service.create(dto);
+  async create(@Body() dto: CreateVersionDto) {
+    if (!dto.modelId) {
+      throw new Error('modelId is required to create version');
+    }
+    return this.service.create(dto.modelId, dto);
   }
 
-  // ✅ Si llega ?modelId=..., filtramos versiones por modelo
-  //    Si no, devolvemos todas
   @Get()
-  async findAll(@Query('modelId') modelId?: string) {
-    if (modelId) {
-      const id = parseInt(modelId, 10);
-      if (isNaN(id)) throw new NotFoundException('Invalid modelId');
-      return this.service.findAll(id);
-    }
+  findAll() {
     return this.service.findAll();
   }
 

@@ -2,45 +2,373 @@
 > autos-backend@0.0.1 start:dev
 > nest start --watch
 
-[2J[3J[H[[90m3:32:54 PM[0m] Starting compilation in watch mode...
+[2J[3J[H[[90m9:17:47 PM[0m] Starting compilation in watch mode...
 
-[96msrc/app.module.ts[0m:[93m77[0m:[93m3[0m - [91merror[0m[90m TS1005: [0m',' expected.
+[96msrc/budgets/budgets.service.ts[0m:[93m12[0m:[93m14[0m - [91merror[0m[90m TS1146: [0mDeclaration expected.
 
-[7m77[0m });
+[7m12[0m @Injectable()
+[7m  [0m [91m             [0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m15[0m:[93m19[0m - [91merror[0m[90m TS1109: [0mExpression expected.
+
+[7m15[0m   private readonly budgetsRepository: Repository<Budget>,
+[7m  [0m [91m                  [0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m15[0m:[93m20[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m15[0m   private readonly budgetsRepository: Repository<Budget>,
+[7m  [0m [91m                   ~~~~~~~~~~~~~~~~~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m15[0m:[93m37[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m15[0m   private readonly budgetsRepository: Repository<Budget>,
+[7m  [0m [91m                                    ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m17[0m:[93m19[0m - [91merror[0m[90m TS1109: [0mExpression expected.
+
+[7m17[0m   private readonly vehiclesRepository: Repository<Vehicle>,
+[7m  [0m [91m                  [0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m17[0m:[93m20[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m17[0m   private readonly vehiclesRepository: Repository<Vehicle>,
+[7m  [0m [91m                   ~~~~~~~~~~~~~~~~~~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m17[0m:[93m38[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m17[0m   private readonly vehiclesRepository: Repository<Vehicle>,
+[7m  [0m [91m                                     ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m19[0m:[93m19[0m - [91merror[0m[90m TS1109: [0mExpression expected.
+
+[7m19[0m   private readonly clientsRepository: Repository<Client>,
+[7m  [0m [91m                  [0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m19[0m:[93m20[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m19[0m   private readonly clientsRepository: Repository<Client>,
+[7m  [0m [91m                   ~~~~~~~~~~~~~~~~~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m19[0m:[93m37[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m19[0m   private readonly clientsRepository: Repository<Client>,
+[7m  [0m [91m                                    ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m20[0m:[93m11[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m20[0m   private readonly budgetReportsService: BudgetReportsService, // 👈 agregado
+[7m  [0m [91m          ~~~~~~~~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m20[0m:[93m20[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m20[0m   private readonly budgetReportsService: BudgetReportsService, // 👈 agregado
+[7m  [0m [91m                   ~~~~~~~~~~~~~~~~~~~~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m20[0m:[93m40[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m20[0m   private readonly budgetReportsService: BudgetReportsService, // 👈 agregado
+[7m  [0m [91m                                       ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m21[0m:[93m3[0m - [91merror[0m[90m TS1005: [0m';' expected.
+
+[7m21[0m ) {}
 [7m  [0m [91m  ~[0m
 
-[96msrc/app.module.ts[0m:[93m81[0m:[93m22[0m - [91merror[0m[90m TS1005: [0m',' expected.
+[96msrc/budgets/budgets.service.ts[0m:[93m24[0m:[93m3[0m - [91merror[0m[90m TS1128: [0mDeclaration or statement expected.
 
-[7m81[0m     ServeStaticModule.forRoot({
+[7m24[0m   private pesos(n: number | null | undefined) {
+[7m  [0m [91m  ~~~~~~~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m24[0m:[93m18[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m24[0m   private pesos(n: number | null | undefined) {
+[7m  [0m [91m                 ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m24[0m:[93m47[0m - [91merror[0m[90m TS1005: [0m';' expected.
+
+[7m24[0m   private pesos(n: number | null | undefined) {
+[7m  [0m [91m                                              ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m29[0m:[93m3[0m - [91merror[0m[90m TS1128: [0mDeclaration or statement expected.
+
+[7m29[0m   private nowString(): string {
+[7m  [0m [91m  ~~~~~~~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m29[0m:[93m22[0m - [91merror[0m[90m TS1005: [0m';' expected.
+
+[7m29[0m   private nowString(): string {
 [7m  [0m [91m                     ~[0m
 
-[96msrc/app.module.ts[0m:[93m102[0m:[93m3[0m - [91merror[0m[90m TS1136: [0mProperty assignment expected.
+[96msrc/budgets/budgets.service.ts[0m:[93m29[0m:[93m24[0m - [91merror[0m[90m TS1434: [0mUnexpected keyword or identifier.
 
-[7m102[0m   ],
+[7m29[0m   private nowString(): string {
+[7m  [0m [91m                       ~~~~~~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m39[0m:[93m3[0m - [91merror[0m[90m TS1434: [0mUnexpected keyword or identifier.
+
+[7m39[0m   async findAll() {
+[7m  [0m [91m  ~~~~~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m39[0m:[93m19[0m - [91merror[0m[90m TS1005: [0m';' expected.
+
+[7m39[0m   async findAll() {
+[7m  [0m [91m                  ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m46[0m:[93m3[0m - [91merror[0m[90m TS1434: [0mUnexpected keyword or identifier.
+
+[7m46[0m   async findOne(id: number) {
+[7m  [0m [91m  ~~~~~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m46[0m:[93m19[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m46[0m   async findOne(id: number) {
+[7m  [0m [91m                  ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m46[0m:[93m29[0m - [91merror[0m[90m TS1005: [0m';' expected.
+
+[7m46[0m   async findOne(id: number) {
+[7m  [0m [91m                            ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m55[0m:[93m1[0m - [91merror[0m[90m TS1434: [0mUnexpected keyword or identifier.
+
+[7m55[0m async create(dto: any) {
+[7m  [0m [91m~~~~~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m55[0m:[93m17[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m55[0m async create(dto: any) {
+[7m  [0m [91m                ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m55[0m:[93m24[0m - [91merror[0m[90m TS1005: [0m';' expected.
+
+[7m55[0m async create(dto: any) {
+[7m  [0m [91m                       ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m103[0m:[93m3[0m - [91merror[0m[90m TS1434: [0mUnexpected keyword or identifier.
+
+[7m103[0m   async update(id: number, dto: any) {
+[7m   [0m [91m  ~~~~~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m103[0m:[93m18[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m103[0m   async update(id: number, dto: any) {
+[7m   [0m [91m                 ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m103[0m:[93m31[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m103[0m   async update(id: number, dto: any) {
+[7m   [0m [91m                              ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m103[0m:[93m38[0m - [91merror[0m[90m TS1005: [0m';' expected.
+
+[7m103[0m   async update(id: number, dto: any) {
+[7m   [0m [91m                                     ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m109[0m:[93m3[0m - [91merror[0m[90m TS1434: [0mUnexpected keyword or identifier.
+
+[7m109[0m   async remove(id: number) {
+[7m   [0m [91m  ~~~~~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m109[0m:[93m18[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m109[0m   async remove(id: number) {
+[7m   [0m [91m                 ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m109[0m:[93m28[0m - [91merror[0m[90m TS1005: [0m';' expected.
+
+[7m109[0m   async remove(id: number) {
+[7m   [0m [91m                           ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m115[0m:[93m3[0m - [91merror[0m[90m TS1434: [0mUnexpected keyword or identifier.
+
+[7m115[0m   async getPdf(id: number): Promise<Buffer> {
+[7m   [0m [91m  ~~~~~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m115[0m:[93m18[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m115[0m   async getPdf(id: number): Promise<Buffer> {
+[7m   [0m [91m                 ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m115[0m:[93m27[0m - [91merror[0m[90m TS1005: [0m';' expected.
+
+[7m115[0m   async getPdf(id: number): Promise<Buffer> {
+[7m   [0m [91m                          ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m116[0m:[93m11[0m - [91merror[0m[90m TS1005: [0m':' expected.
+
+[7m116[0m     const budget = await this.findOne(id);
+[7m   [0m [91m          ~~~~~~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m116[0m:[93m42[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m116[0m     const budget = await this.findOne(id);
+[7m   [0m [91m                                         ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m118[0m:[93m11[0m - [91merror[0m[90m TS1005: [0m':' expected.
+
+[7m118[0m     const dir = path.join(__dirname, '../../uploads/budgets', String(budget.id));
+[7m   [0m [91m          ~~~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m118[0m:[93m81[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m118[0m     const dir = path.join(__dirname, '../../uploads/budgets', String(budget.id));
+[7m   [0m [91m                                                                                ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m119[0m:[93m9[0m - [91merror[0m[90m TS1003: [0mIdentifier expected.
+
+[7m119[0m     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+[7m   [0m [91m        ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m119[0m:[93m12[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m119[0m     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+[7m   [0m [91m           ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m119[0m:[93m28[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m119[0m     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+[7m   [0m [91m                           ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m119[0m:[93m32[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m119[0m     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+[7m   [0m [91m                               ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m119[0m:[93m68[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m119[0m     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+[7m   [0m [91m                                                                   ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m120[0m:[93m11[0m - [91merror[0m[90m TS1005: [0m':' expected.
+
+[7m120[0m     const filePath = path.join(dir, `presupuesto_${budget.id}.pdf`);
+[7m   [0m [91m          ~~~~~~~~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m120[0m:[93m68[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m120[0m     const filePath = path.join(dir, `presupuesto_${budget.id}.pdf`);
+[7m   [0m [91m                                                                   ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m122[0m:[93m11[0m - [91merror[0m[90m TS1005: [0m':' expected.
+
+[7m122[0m     const doc = new PDFDocument({ margin: 50 });
+[7m   [0m [91m          ~~~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m122[0m:[93m48[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m122[0m     const doc = new PDFDocument({ margin: 50 });
+[7m   [0m [91m                                               ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m123[0m:[93m11[0m - [91merror[0m[90m TS1005: [0m':' expected.
+
+[7m123[0m     const chunks: Buffer[] = [];
+[7m   [0m [91m          ~~~~~~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m123[0m:[93m17[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m123[0m     const chunks: Buffer[] = [];
+[7m   [0m [91m                ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m123[0m:[93m25[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m123[0m     const chunks: Buffer[] = [];
+[7m   [0m [91m                        ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m123[0m:[93m26[0m - [91merror[0m[90m TS1109: [0mExpression expected.
+
+[7m123[0m     const chunks: Buffer[] = [];
+[7m   [0m [91m                         ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m123[0m:[93m28[0m - [91merror[0m[90m TS1005: [0m':' expected.
+
+[7m123[0m     const chunks: Buffer[] = [];
+[7m   [0m [91m                           ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m123[0m:[93m32[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m123[0m     const chunks: Buffer[] = [];
+[7m   [0m [91m                               ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m124[0m:[93m8[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m124[0m     doc.on('data', (c) => chunks.push(c));
+[7m   [0m [91m       ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m124[0m:[93m42[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m124[0m     doc.on('data', (c) => chunks.push(c));
+[7m   [0m [91m                                         ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m125[0m:[93m11[0m - [91merror[0m[90m TS1005: [0m':' expected.
+
+[7m125[0m     const done = new Promise<Buffer>((resolve) =>
+[7m   [0m [91m          ~~~~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m127[0m:[93m6[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m127[0m     );
+[7m   [0m [91m     ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m130[0m:[93m9[0m - [91merror[0m[90m TS1005: [0m':' expected.
+
+[7m130[0m     try {
+[7m   [0m [91m        ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m131[0m:[93m13[0m - [91merror[0m[90m TS1005: [0m':' expected.
+
+[7m131[0m       const logoPath = path.join(__dirname, '../../logos/Logobyn.JPG');
+[7m   [0m [91m            ~~~~~~~~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m131[0m:[93m71[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m131[0m       const logoPath = path.join(__dirname, '../../logos/Logobyn.JPG');
+[7m   [0m [91m                                                                      ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m132[0m:[93m13[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m132[0m       if (fs.existsSync(logoPath)) {
+[7m   [0m [91m            ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m132[0m:[93m34[0m - [91merror[0m[90m TS1005: [0m',' expected.
+
+[7m132[0m       if (fs.existsSync(logoPath)) {
+[7m   [0m [91m                                 ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m132[0m:[93m36[0m - [91merror[0m[90m TS1136: [0mProperty assignment expected.
+
+[7m132[0m       if (fs.existsSync(logoPath)) {
+[7m   [0m [91m                                   ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m136[0m:[93m5[0m - [91merror[0m[90m TS1128: [0mDeclaration or statement expected.
+
+[7m136[0m     } catch (err) {
+[7m   [0m [91m    ~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m136[0m:[93m7[0m - [91merror[0m[90m TS1005: [0m'try' expected.
+
+[7m136[0m     } catch (err) {
+[7m   [0m [91m      ~~~~~[0m
+
+[96msrc/budgets/budgets.service.ts[0m:[93m274[0m:[93m3[0m - [91merror[0m[90m TS1128: [0mDeclaration or statement expected.
+
+[7m274[0m   }
 [7m   [0m [91m  ~[0m
 
-[96msrc/app.module.ts[0m:[93m102[0m:[93m4[0m - [91merror[0m[90m TS1136: [0mProperty assignment expected.
+[96msrc/budgets/budgets.service.ts[0m:[93m275[0m:[93m1[0m - [91merror[0m[90m TS1128: [0mDeclaration or statement expected.
 
-[7m102[0m   ],
-[7m   [0m [91m   ~[0m
+[7m275[0m }
+[7m   [0m [91m~[0m
 
-[[90m3:33:00 PM[0m] Found 4 errors. Watching for file changes.
+[[90m9:17:53 PM[0m] Found 71 errors. Watching for file changes.
 
-[2J[3J[H[[90m3:33:51 PM[0m] File change detected. Starting incremental compilation...
+[2J[3J[H[[90m9:19:14 PM[0m] File change detected. Starting incremental compilation...
 
-[[90m3:33:52 PM[0m] Found 0 errors. Watching for file changes.
+[96msrc/budgets/budgets.service.ts[0m:[93m84[0m:[93m7[0m - [91merror[0m[90m TS2353: [0mObject literal may only specify known properties, and 'budgetId' does not exist in type 'CreateBudgetReportDto'.
 
-[dotenv@17.2.1] injecting env (5) from .env -- tip: ⚙️  specify custom .env file path with { path: '/custom/path/.env' }
-[32m[Nest] 2748  - [39m10/31/2025, 3:33:54 PM [32m    LOG[39m [38;5;3m[NestFactory] [39m[32mStarting Nest application...[39m
-[32m[Nest] 2748  - [39m10/31/2025, 3:33:54 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mTypeOrmModule dependencies initialized[39m[38;5;3m +54ms[39m
-[32m[Nest] 2748  - [39m10/31/2025, 3:33:54 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mPassportModule dependencies initialized[39m[38;5;3m +0ms[39m
-[32m[Nest] 2748  - [39m10/31/2025, 3:33:54 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mConfigHostModule dependencies initialized[39m[38;5;3m +0ms[39m
-[32m[Nest] 2748  - [39m10/31/2025, 3:33:54 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mDiscoveryModule dependencies initialized[39m[38;5;3m +1ms[39m
-[32m[Nest] 2748  - [39m10/31/2025, 3:33:54 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mAppModule dependencies initialized[39m[38;5;3m +0ms[39m
-[32m[Nest] 2748  - [39m10/31/2025, 3:33:54 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mConfigModule dependencies initialized[39m[38;5;3m +0ms[39m
-[32m[Nest] 2748  - [39m10/31/2025, 3:33:54 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mConfigModule dependencies initialized[39m[38;5;3m +1ms[39m
-[32m[Nest] 2748  - [39m10/31/2025, 3:33:54 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mServeStaticModule dependencies initialized[39m[38;5;3m +0ms[39m
-[32m[Nest] 2748  - [39m10/31/2025, 3:33:54 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mScheduleModule dependencies initialized[39m[38;5;3m +1ms[39m
-[32m[Nest] 2748  - [39m10/31/2025, 3:33:54 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mRolesModule dependencies initialized[39m[38;5;3m +0ms[39m
-[32m[Nest] 2748  - [39m10/31/2025, 3:33:54 PM [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mJwtModule dependencies initialized[39m[38;5;3m +0ms[39m
+[7m84[0m       budgetId: savedBudget.id,
+[7m  [0m [91m      ~~~~~~~~[0m
+
+[[90m9:19:15 PM[0m] Found 1 error. Watching for file changes.
+
 Terminate batch job (Y/N)? 
+^C
