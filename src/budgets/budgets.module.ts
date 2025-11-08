@@ -6,10 +6,11 @@ import { Budget } from './budget.entity';
 import { Vehicle } from '../vehicles/vehicle.entity';
 import { Client } from '../clients/entities/client.entity';
 import { BudgetReportsModule } from '../budget-reports/budget-reports.module'; // 👈 agregado
+import { LoanRate } from '../loan-rates/loan-rate.entity'; // ✅ Importa la entidad
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Budget, Vehicle, Client]),
+    TypeOrmModule.forFeature([Budget, Vehicle, Client, LoanRate]),
     BudgetReportsModule, // 👈 agregado
   ],
   controllers: [BudgetsController],

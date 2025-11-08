@@ -1,10 +1,11 @@
 ﻿import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DeepPartial } from 'typeorm';
 import { Budget } from './budget.entity';
 import { Vehicle } from '../vehicles/vehicle.entity';
 import { Client } from '../clients/entities/client.entity';
 import { BudgetReportsService } from '../budget-reports/budget-reports.service';
+import { LoanRate } from '../loan-rates/loan-rate.entity';
 import PDFDocument from 'pdfkit';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -18,6 +19,8 @@ export class BudgetsService {
     private readonly vehiclesRepository: Repository<Vehicle>,
     @InjectRepository(Client)
     private readonly clientsRepository: Repository<Client>,
+    @InjectRepository(LoanRate)
+    private readonly loanRatesRepository: Repository<LoanRate>,
     private readonly budgetReportsService: BudgetReportsService,
   ) {}
 
@@ -63,31 +66,88 @@ export class BudgetsService {
     });
     if (!client) throw new BadRequestException('Cliente no encontrado');
 
-    const budget = this.budgetsRepository.create({
+    // 🧮 Buscar tasas según el tipo de préstamo y meses
+    const prendarioRate = await this.loanRatesRepository.findOne({
+      where: { type: 'prendario', months: dto.installments },
+    });
+    const personalRate = await this.loanRatesRepository.findOne({
+      where: { type: 'personal', months: dto.installments },
+    });
+    const financiacionRate = await this.loanRatesRepository.findOne({
+      where: { type: 'financiacion', months: dto.installments },
+    });
+
+    console.log('📊 Tasas aplicadas:', {
+      prendarioRate: prendarioRate?.rate,
+      personalRate: personalRate?.rate,
+      financiacionRate: financiacionRate?.rate,
+    });
+
+    // 💰 Aplicar tasas si existen (monto final con interés simple agregado)
+    const prendarioConInteres =
+      dto.prendarioAmount != null
+        ? dto.prendarioAmount * (1 + (prendarioRate?.rate || 0) / 100)
+        : undefined;
+
+    const personalConInteres =
+      dto.personalAmount != null
+        ? dto.personalAmount * (1 + (personalRate?.rate || 0) / 100)
+        : undefined;
+
+    const financiacionConInteres =
+      dto.financiacionAmount != null
+        ? dto.financiacionAmount * (1 + (financiacionRate?.rate || 0) / 100)
+        : undefined;
+
+    // 🔹 Calcular total final con intereses
+    const finalPrice =
+      (dto.downPayment || 0) +
+      (dto.tradeInValue || 0) +
+      (prendarioConInteres || 0) +
+      (personalConInteres || 0) +
+      (financiacionConInteres || 0);
+
+    // 💵 Calcular valor de cuota total (suma de montos financiados / cuotas)
+    const totalPrestamos =
+      (prendarioConInteres || 0) +
+      (personalConInteres || 0) +
+      (financiacionConInteres || 0);
+
+    const installments: number = dto.installments || 0;
+    const installmentValue =
+      installments > 0 && totalPrestamos > 0 ? totalPrestamos / installments : undefined;
+
+    // 🧾 Crear el presupuesto correctamente tipado
+    const budgetBase: DeepPartial<Budget> = {
       vehicle,
       client,
       price: dto.price,
       status: dto.status ?? 'pending',
       paymentType: dto.paymentType ?? null,
-      installments: dto.installments ?? null,
-      finalPrice: dto.finalPrice ?? null,
-      installmentValue: dto.installmentValue ?? null,
-      downPayment: dto.downPayment ?? null,
-      tradeInValue: dto.tradeInValue ?? null,
-      prendarioRate: dto.prendarioRate ?? null,
-      prendarioMonths: dto.prendarioMonths ?? null,
-      prendarioAmount: dto.prendarioAmount ?? null,
-      personalRate: dto.personalRate ?? null,
-      personalMonths: dto.personalMonths ?? null,
-      personalAmount: dto.personalAmount ?? null,
-      financiacionRate: dto.financiacionRate ?? null,
-      financiacionMonths: dto.financiacionMonths ?? null,
-      financiacionAmount: dto.financiacionAmount ?? null,
-    });
+      installments,
+      finalPrice,
+      installmentValue, // si no aplica, queda undefined (OK para DeepPartial)
+      // Campos opcionales: si no hay valor, los omitimos (no usamos null)
+      downPayment: dto.downPayment ?? undefined,
+      tradeInValue: dto.tradeInValue ?? undefined,
+      prendarioMonths: dto.prendarioMonths ?? undefined,
+      personalMonths: dto.personalMonths ?? undefined,
+      financiacionMonths: dto.financiacionMonths ?? undefined,
+    };
 
-    const savedBudget = await this.budgetsRepository.save(budget);
+    // Agregar condicionalmente tasas y montos (solo si existen)
+    if (prendarioRate?.rate != null) budgetBase.prendarioRate = prendarioRate.rate;
+    if (personalRate?.rate != null) budgetBase.personalRate = personalRate.rate;
+    if (financiacionRate?.rate != null) budgetBase.financiacionRate = financiacionRate.rate;
 
-    // 🧾 Registrar también en budget-reports
+    if (prendarioConInteres != null) budgetBase.prendarioAmount = prendarioConInteres;
+    if (personalConInteres != null) budgetBase.personalAmount = personalConInteres;
+    if (financiacionConInteres != null) budgetBase.financiacionAmount = financiacionConInteres;
+
+    const created = this.budgetsRepository.create(budgetBase);
+    const savedBudget: Budget = await this.budgetsRepository.save(created);
+
+    // 📊 Registrar en budget-reports (installmentValue como número; si no hay, 0)
     try {
       await this.budgetReportsService.create({
         budgetId: savedBudget.id,
@@ -96,14 +156,13 @@ export class BudgetsService {
         sellerId: dto.sellerId,
         paymentType: dto.paymentType,
         listPrice: dto.price,
-        finalPrice: dto.finalPrice,
-        installments: dto.installments,
-        installmentValue: dto.installmentValue,
+        finalPrice,
+        installments,
+        installmentValue: installmentValue ?? 0,
         downPayment: dto.downPayment,
         status: dto.status,
       });
-
-      console.log(`✅ Reporte de presupuesto creado para budget ${savedBudget.id}`);
+      console.log(`✅ Reporte creado con tasas para budget ${savedBudget.id}`);
     } catch (err) {
       console.error('⚠️ No se pudo crear el registro en budget-reports:', err);
     }
@@ -122,7 +181,7 @@ export class BudgetsService {
     return this.budgetsRepository.remove(budget);
   }
 
-// ✅ Generar PDF limpio sin cuadro ni total financiado
+// ✅ Generar PDF con formato limpio, montos netos y sin “Precio Final”
 async getPdf(id: number): Promise<Buffer> {
   const budget = await this.findOne(id);
 
@@ -137,7 +196,6 @@ async getPdf(id: number): Promise<Buffer> {
     doc.on('end', () => resolve(Buffer.concat(chunks))),
   );
 
-  // 🖼️ Marca de agua
   try {
     const logoPath = path.join(__dirname, '../../logos/Logobyn.JPG');
     if (fs.existsSync(logoPath)) {
@@ -148,16 +206,9 @@ async getPdf(id: number): Promise<Buffer> {
     console.warn('⚠️ No se pudo cargar el logo de marca de agua');
   }
 
-  // 🏷️ Encabezado
-  doc
-    .fontSize(22)
-    .fillColor('#1e1e1e')
-    .text('DE GRAZIA AUTOMOTORES', { align: 'center' });
+  doc.fontSize(22).fillColor('#1e1e1e').text('DE GRAZIA AUTOMOTORES', { align: 'center' });
   doc.fontSize(12).fillColor('#555').text('Presupuesto de Vehículo', { align: 'center' });
-  doc
-    .fontSize(10)
-    .fillColor('#777')
-    .text(`Emitido el ${this.nowString()}`, { align: 'center' });
+  doc.fontSize(10).fillColor('#777').text(`Emitido el ${this.nowString()}`, { align: 'center' });
   doc.moveDown(1);
   doc.moveTo(50, doc.y).lineTo(550, doc.y).strokeColor('#009879').stroke();
   doc.moveDown(1);
@@ -169,7 +220,15 @@ async getPdf(id: number): Promise<Buffer> {
     doc.fontSize(11).fillColor('#1e1e1e');
   };
 
-  const formatCuota = (monto: number | null, cuotas: number | null) => {
+  const formatPesos = (valor?: number | null): string => {
+    if (valor == null) return '-';
+    return `$ ${valor.toLocaleString('es-AR', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+  };
+
+  const formatCuota = (monto: number | null | undefined, cuotas: number | null | undefined) => {
     if (!monto || !cuotas) return '-';
     const valor = monto / cuotas;
     return `$ ${valor.toLocaleString('es-AR', {
@@ -187,60 +246,67 @@ async getPdf(id: number): Promise<Buffer> {
 
   // 💸 Montos principales
   sectionTitle('Detalle de Montos');
-  if (budget.downPayment) doc.text(`Anticipo: ${this.pesos(budget.downPayment)}`);
-  if (budget.tradeInValue) doc.text(`Valor de Permuta: ${this.pesos(budget.tradeInValue)}`);
-  if (budget.price) doc.text(`Precio Lista: ${this.pesos(budget.price)}`);
-  if (budget.finalPrice) doc.text(`Precio Final: ${this.pesos(budget.finalPrice)}`);
-  if (budget.installmentValue)
-    doc.text(`Valor de Cuota Total: ${this.pesos(budget.installmentValue)}`);
+  if (budget.downPayment != null) doc.text(`Anticipo: ${formatPesos(budget.downPayment)}`);
+  if (budget.tradeInValue != null) doc.text(`Valor de Permuta: ${formatPesos(budget.tradeInValue)}`);
+  if (budget.price != null) doc.text(`Precio Lista: ${formatPesos(budget.price)}`);
+  if (budget.installmentValue != null)
+    doc.text(`Valor de Cuota Total: ${formatPesos(budget.installmentValue)}`);
 
   // 💰 Detalle de préstamos
   const hasLoans =
-    budget.prendarioAmount || budget.personalAmount || budget.financiacionAmount;
+    !!budget.prendarioAmount || !!budget.personalAmount || !!budget.financiacionAmount;
 
   if (hasLoans) {
     sectionTitle('Detalle de Préstamos y Financiaciones');
 
-    if (budget.prendarioAmount) {
+    // Para mostrar el monto neto (sin interés)
+    const calcNeto = (montoConInteres?: number | null, tasa?: number | null) => {
+      if (!montoConInteres || !tasa) return montoConInteres || 0;
+      return montoConInteres / (1 + tasa / 100);
+    };
+
+    if (budget.prendarioAmount != null) {
+      const neto = calcNeto(budget.prendarioAmount, budget.prendarioRate);
       doc.moveDown(0.5);
-      doc
-        .fontSize(12)
-        .fillColor('#009879')
-        .text('Préstamo Prendario');
+      doc.fontSize(12).fillColor('#009879').text('Préstamo Prendario');
       doc
         .fontSize(11)
         .fillColor('#000')
-        .text(`Monto: ${this.pesos(budget.prendarioAmount)}`)
-        .text(`Cuotas: ${budget.prendarioMonths || '-'}`)
+        .text(`Monto (neto): ${formatPesos(neto)}`)
+        .text(`Tasa aplicada: ${budget.prendarioRate ?? 0}%`)
+        .text(`Cuotas: ${budget.prendarioMonths ?? '-'}`)
         .text(`Valor de cada cuota: ${formatCuota(budget.prendarioAmount, budget.prendarioMonths)}`);
     }
 
-    if (budget.personalAmount) {
+    if (budget.personalAmount != null) {
+      const neto = calcNeto(budget.personalAmount, budget.personalRate);
       doc.moveDown(0.8);
-      doc
-        .fontSize(12)
-        .fillColor('#009879')
-        .text('Préstamo Personal');
+      doc.fontSize(12).fillColor('#009879').text('Préstamo Personal');
       doc
         .fontSize(11)
         .fillColor('#000')
-        .text(`Monto: ${this.pesos(budget.personalAmount)}`)
-        .text(`Cuotas: ${budget.personalMonths || '-'}`)
+        .text(`Monto (neto): ${formatPesos(neto)}`)
+        .text(`Tasa aplicada: ${budget.personalRate ?? 0}%`)
+        .text(`Cuotas: ${budget.personalMonths ?? '-'}`)
         .text(`Valor de cada cuota: ${formatCuota(budget.personalAmount, budget.personalMonths)}`);
     }
 
-    if (budget.financiacionAmount) {
+    if (budget.financiacionAmount != null) {
+      const neto = calcNeto(budget.financiacionAmount, budget.financiacionRate);
       doc.moveDown(0.8);
-      doc
-        .fontSize(12)
-        .fillColor('#009879')
-        .text('Financiación Personal');
+      doc.fontSize(12).fillColor('#009879').text('Financiación Personal');
       doc
         .fontSize(11)
         .fillColor('#000')
-        .text(`Monto: ${this.pesos(budget.financiacionAmount)}`)
-        .text(`Cuotas: ${budget.financiacionMonths || '-'}`)
-        .text(`Valor de cada cuota: ${formatCuota(budget.financiacionAmount, budget.financiacionMonths)}`);
+        .text(`Monto (neto): ${formatPesos(neto)}`)
+        .text(`Tasa aplicada: ${budget.financiacionRate ?? 0}%`)
+        .text(`Cuotas: ${budget.financiacionMonths ?? '-'}`)
+        .text(
+          `Valor de cada cuota: ${formatCuota(
+            budget.financiacionAmount,
+            budget.financiacionMonths,
+          )}`,
+        );
     }
   }
 
@@ -256,9 +322,7 @@ async getPdf(id: number): Promise<Buffer> {
   // 🚗 Vehículo
   if (budget.vehicle) {
     sectionTitle('Vehículo');
-    doc.text(
-      `${budget.vehicle.brand} ${budget.vehicle.model} ${budget.vehicle.versionName || ''}`,
-    );
+    doc.text(`${budget.vehicle.brand} ${budget.vehicle.model} ${budget.vehicle.versionName || ''}`);
     if (budget.vehicle.year) doc.text(`Año: ${budget.vehicle.year}`);
     if (budget.vehicle.color) doc.text(`Color: ${budget.vehicle.color}`);
     if (budget.vehicle.plate) doc.text(`Patente: ${budget.vehicle.plate}`);
@@ -268,14 +332,11 @@ async getPdf(id: number): Promise<Buffer> {
   doc.moveDown(2);
   doc.moveTo(50, doc.y).lineTo(550, doc.y).strokeColor('#ccc').stroke();
   doc.moveDown(1);
-  doc
-    .fontSize(13)
-    .fillColor('#009879')
-    .text('CONDICIONES LEGALES Y COMERCIALES', { underline: true });
+  doc.fontSize(13).fillColor('#009879').text('CONDICIONES LEGALES Y COMERCIALES', { underline: true });
   doc.moveDown(0.5);
   const legales = `
-1. El presente documento no implica oferta irrevocable ni contrato, sino un presupuesto estimativo sujeto a disponibilidad del vehículo y aprobación crediticia. 
-2. La cotización tiene una vigencia de 48 horas. 
+1. El presente documento no implica oferta irrevocable ni contrato, sino un presupuesto estimativo sujeto a disponibilidad del vehículo y aprobación crediticia.
+2. La cotización tiene una vigencia de 48 horas.
 3. Las tasas e importes indicados son orientativos y podrán modificarse según evaluación crediticia.
 `;
   doc.fontSize(8.5).fillColor('#555').text(legales, { align: 'justify', lineGap: 2.5 });
