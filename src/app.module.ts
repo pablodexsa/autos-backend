@@ -7,6 +7,9 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ReservationsModule } from './reservations/reservations.module';
+import { APP_INTERCEPTOR } from '@nestjs/core';
+import { AuditInterceptor } from './audit/audit.interceptor';
+
 
 // 📦 Módulos internos
 import { UsersModule } from './users/users.module';
@@ -25,6 +28,7 @@ import { VersionsModule } from './versions/versions.module';
 import { InstallmentSettingsModule } from './installment-settings/installment-settings.module';
 import { BudgetReportsModule } from './budget-reports/budget-reports.module';
 import { LoanRatesModule } from './loan-rates/loan-rates.module';
+import { AuditModule } from './audit/audit.module';
 
 // 📦 Entidades
 import { User } from './users/user.entity';
@@ -100,8 +104,16 @@ TypeOrmModule.forRoot({
     VersionsModule,
     BudgetReportsModule,
     LoanRatesModule,
+    AuditModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+{
+  provide: APP_INTERCEPTOR,
+  useClass: AuditInterceptor,
+}
+
+  ],
 })
 export class AppModule {}
