@@ -1,4 +1,4 @@
-import {
+﻿import {
   Injectable,
   NestInterceptor,
   ExecutionContext,
@@ -14,15 +14,27 @@ export class AuditInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     const req = context.switchToHttp().getRequest();
 
-    const user = req.user; // viene del JWT
-    const module = req.route?.path || "unknown";
-    const action = req.method;
+    const user = req.user;
     const ip = req.ip;
+
+    // ✅ Acción = método HTTP
+    const action = req.method;
+
+    // ✅ Módulo = controlador + handler o ruta base (LEGIBLE)
+    const controller = context.getClass().name.replace('Controller', '');
+    const handler = context.getHandler().name;
+
+    // ✅ Path limpio sin query params
+    const rawUrl = req.originalUrl || req.url;
+    const cleanPath = rawUrl.split('?')[0];
+
+    const moduleName = `${controller} → ${cleanPath} → ${handler}()`; 
+    // Ejemplo: Vehicles → /api/vehicles → findAll()
 
     const details = {
       params: req.params,
-      query: req.query,
       body: req.body,
+      query: req.query,
     };
 
     return next.handle().pipe(
@@ -31,12 +43,12 @@ export class AuditInterceptor implements NestInterceptor {
           this.auditService.log(
             user.id,
             action,
-            module,
+            moduleName,
             details,
             ip,
           );
         }
-      })
+      }),
     );
   }
 }

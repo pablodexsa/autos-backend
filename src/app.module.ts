@@ -9,6 +9,9 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ReservationsModule } from './reservations/reservations.module';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AuditInterceptor } from './audit/audit.interceptor';
+import { APP_GUARD } from '@nestjs/core';
+import { JwtAuthGuard } from './auth/jwt-auth.guard';
+
 
 
 // 📦 Módulos internos
@@ -109,6 +112,11 @@ TypeOrmModule.forRoot({
   controllers: [AppController],
   providers: [
     AppService,
+{
+  provide: APP_GUARD,
+  useClass: JwtAuthGuard,
+},
+
 {
   provide: APP_INTERCEPTOR,
   useClass: AuditInterceptor,
