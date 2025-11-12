@@ -1,11 +1,11 @@
-import {
+﻿import {
   Controller,
   Get,
   Post,
   Body,
   Param,
   Delete,
-  Put,
+  Patch,
   Query,
   ParseIntPipe,
 } from '@nestjs/common';
@@ -17,26 +17,34 @@ import { UpdateUserDto } from './dto/update-user.dto';
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
+  // ✅ Obtener todos los usuarios con búsqueda opcional
   @Get()
   findAll(@Query('q') q?: string) {
     return this.usersService.findAll({ q });
   }
 
+  // ✅ Obtener un usuario por ID
   @Get(':id')
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.usersService.findOne(id);
   }
 
+  // ✅ Crear usuario
   @Post()
   create(@Body() dto: CreateUserDto) {
     return this.usersService.create(dto);
   }
 
-  @Put(':id')
-  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateUserDto) {
+  // ✅ Actualizar usuario (parcial) — corrección principal
+  @Patch(':id')
+  update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateUserDto,
+  ) {
     return this.usersService.update(id, dto);
   }
 
+  // ✅ Eliminar usuario
   @Delete(':id')
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.usersService.remove(id);

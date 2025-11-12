@@ -14,22 +14,29 @@ export class AuditInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     const req = context.switchToHttp().getRequest();
 
+    // ✅ NO AUDITAR LOGIN NI REGISTER
+    const rawUrl = req.originalUrl || req.url;
+    if (
+      rawUrl.includes('/auth/login') ||
+      rawUrl.includes('/auth/register')
+    ) {
+      return next.handle(); // ❗ SÚPER IMPORTANTE
+    }
+
     const user = req.user;
     const ip = req.ip;
 
     // ✅ Acción = método HTTP
     const action = req.method;
 
-    // ✅ Módulo = controlador + handler o ruta base (LEGIBLE)
+    // ✅ Módulo legible
     const controller = context.getClass().name.replace('Controller', '');
     const handler = context.getHandler().name;
 
-    // ✅ Path limpio sin query params
-    const rawUrl = req.originalUrl || req.url;
+    // ✅ Path sin query params
     const cleanPath = rawUrl.split('?')[0];
 
-    const moduleName = `${controller} → ${cleanPath} → ${handler}()`; 
-    // Ejemplo: Vehicles → /api/vehicles → findAll()
+    const moduleName = `${controller} → ${cleanPath} → ${handler}()`;
 
     const details = {
       params: req.params,
@@ -40,13 +47,7 @@ export class AuditInterceptor implements NestInterceptor {
     return next.handle().pipe(
       tap(() => {
         if (user?.id) {
-          this.auditService.log(
-            user.id,
-            action,
-            moduleName,
-            details,
-            ip,
-          );
+          this.auditService.log(user.id, action, moduleName, details, ip);
         }
       }),
     );

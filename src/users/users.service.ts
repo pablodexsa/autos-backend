@@ -1,10 +1,15 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+﻿import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './user.entity';
 import { Role } from '../roles/role.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class UsersService {
@@ -15,7 +20,6 @@ export class UsersService {
     private readonly roleRepo: Repository<Role>,
   ) {}
 
-  // ?? Buscar todos los usuarios (con filtro opcional)
   async findAll(query?: { q?: string }) {
     const qb = this.userRepo
       .createQueryBuilder('user')
@@ -23,22 +27,24 @@ export class UsersService {
       .orderBy('user.createdAt', 'DESC');
 
     if (query?.q) {
-      qb.where('LOWER(user.name) LIKE LOWER(:q) OR LOWER(user.email) LIKE LOWER(:q)', {
-        q: `%${query.q}%`,
-      });
+      qb.where(
+        'LOWER(user.name) LIKE LOWER(:q) OR LOWER(user.email) LIKE LOWER(:q)',
+        { q: `%${query.q}%` },
+      );
     }
 
     return qb.getMany();
   }
 
-  // ?? Buscar por ID
   async findOne(id: number) {
-    const user = await this.userRepo.findOne({ where: { id }, relations: ['role'] });
+    const user = await this.userRepo.findOne({
+      where: { id },
+      relations: ['role'],
+    });
     if (!user) throw new NotFoundException('User not found');
     return user;
   }
 
-  // ?? Buscar por email (usado por auth.service.ts)
   async findByEmail(email: string) {
     return this.userRepo.findOne({
       where: { email },
@@ -46,15 +52,20 @@ export class UsersService {
     });
   }
 
-  // ?? Crear usuario
+  // ✅ Crear usuario con contraseña hasheada
   async create(dto: CreateUserDto) {
     const role = await this.roleRepo.findOne({ where: { id: dto.roleId } });
     if (!role) throw new NotFoundException('Role not found');
 
+    const existing = await this.findByEmail(dto.email);
+    if (existing) throw new BadRequestException('Email ya registrado');
+
+    const hashed = await bcrypt.hash(dto.password, 10);
+
     const user = this.userRepo.create({
       name: dto.name,
       email: dto.email,
-      password: dto.password, // ?? En producci�n usar bcrypt
+      password: hashed,
       role,
       isActive: dto.isActive ?? true,
     });
@@ -62,21 +73,31 @@ export class UsersService {
     return this.userRepo.save(user);
   }
 
-  // ?? Actualizar usuario
+  // ✅ Update SEGURO con re-hash y sin pisar datos
   async update(id: number, dto: UpdateUserDto) {
     const user = await this.findOne(id);
 
+    // ✅ Cambio de rol
     if (dto.roleId) {
       const role = await this.roleRepo.findOne({ where: { id: dto.roleId } });
       if (!role) throw new NotFoundException('Role not found');
       user.role = role;
     }
 
-    Object.assign(user, dto);
+    // ✅ Cambio de contraseña
+    if (dto.password) {
+      const hashed = await bcrypt.hash(dto.password, 10);
+      user.password = hashed;
+    }
+
+    // ✅ Update de campos permitidos
+    if (dto.name !== undefined) user.name = dto.name;
+    if (dto.email !== undefined) user.email = dto.email;
+    if (dto.isActive !== undefined) user.isActive = dto.isActive;
+
     return this.userRepo.save(user);
   }
 
-  // ?? Eliminar usuario
   async remove(id: number) {
     const user = await this.findOne(id);
     return this.userRepo.remove(user);

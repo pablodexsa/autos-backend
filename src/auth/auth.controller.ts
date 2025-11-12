@@ -2,6 +2,8 @@
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { CreateUserDto } from '../users/dto/create-user.dto';
+import { Public } from './decorators/public.decorator';
+import * as bcrypt from 'bcrypt';
 
 @Controller('auth')
 export class AuthController {
@@ -12,9 +14,13 @@ export class AuthController {
     private readonly usersService: UsersService,
   ) {}
 
-  // ✅ Login
+  // ✅ LOGIN (PÚBLICO)
+  @Public()
   @Post('login')
-  async login(@Body('email') email: string, @Body('password') password: string) {
+  async login(
+    @Body('email') email: string,
+    @Body('password') password: string
+  ) {
     if (!email || !password) {
       throw new UnauthorizedException('Email y contraseña requeridos');
     }
@@ -29,15 +35,48 @@ export class AuthController {
     }
   }
 
-  // ✅ Registro (opcional)
+  // ✅ REGISTER (PÚBLICO, OPCIONAL)
+  @Public()
   @Post('register')
   async register(@Body() dto: CreateUserDto) {
     const existing = await this.usersService.findByEmail(dto.email);
     if (existing) {
       throw new UnauthorizedException('El usuario ya existe');
     }
-
     const newUser = await this.usersService.create(dto);
     return this.authService.login(newUser);
+  }
+
+  // ✅ RESET PASSWORD ADMIN (NUEVO)
+  @Public()
+  @Post('reset-admin-password')
+  async resetAdminPassword() {
+    const email = 'admin@degrazia.com';
+    const newPass = 'Ninguno123!';
+
+    const hashed = await bcrypt.hash(newPass, 10);
+
+    let admin = await this.usersService.findByEmail(email);
+
+    if (!admin) {
+      // ✅ Crear si no existe
+      admin = await this.usersService.create({
+        name: 'Administrador',
+        email,
+        password: hashed,
+        isActive: true,
+        roleId: 1,
+      });
+    } else {
+      // ✅ Actualizar si existe
+      await this.usersService.update(admin.id, { password: hashed });
+    }
+
+    return {
+      ok: true,
+      message: '✅ Contraseña del ADMIN reseteada correctamente',
+      email,
+      newPass,
+    };
   }
 }

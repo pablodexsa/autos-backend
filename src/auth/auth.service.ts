@@ -12,26 +12,48 @@ export class AuthService {
     private readonly jwtService: JwtService,
   ) {}
 
-  // ✅ Validar credenciales
+  // ✅ Validar credenciales correctamente
   async validateUser(email: string, pass: string) {
+
+    console.log("🟦 VALIDANDO LOGIN", { email, pass });
+
     const user = await this.usersService.findByEmail(email);
-    if (!user) throw new UnauthorizedException('Usuario no encontrado');
+
+    console.log("🟩 Usuario encontrado en DB:", user);
+
+    if (!user) {
+      console.log("❌ Usuario no encontrado en BD");
+      throw new UnauthorizedException('Usuario no encontrado');
+    }
+
+    const stored = user.password;
+    const isHashed = stored?.startsWith('$2b$');
+
+    console.log("🔐 HASH DETECTADO:", isHashed, stored);
 
     let isMatch = false;
-    try {
-      isMatch = await bcrypt.compare(pass, user.password);
-    } catch (e) {
-      this.logger.error('Error al comparar contraseñas', e);
+
+    if (isHashed) {
+      // ✅ Comparar contraseñas hasheadas
+      isMatch = await bcrypt.compare(pass, stored);
+    } else {
+      // ✅ Comparación texto plano (usuarios viejos)
+      isMatch = stored === pass;
     }
 
-    if (!isMatch && user.password !== pass) {
+    console.log("✅ Resultado bcrypt.compare / texto plano:", isMatch);
+
+    if (!isMatch) {
+      console.log("❌ CONTRASEÑA INCORRECTA");
       throw new UnauthorizedException('Contraseña incorrecta');
     }
+
+    console.log("✅ LOGIN VALIDADO CORRECTAMENTE");
 
     return user;
   }
 
-  // ✅ Generar token compatible con el frontend
+  // ✅ Generar token compatible con frontend
   async login(user: any) {
     try {
       const payload = {
@@ -43,7 +65,7 @@ export class AuthService {
       const token = this.jwtService.sign(payload);
 
       return {
-        token, // 👈 nombre esperado por el frontend
+        access_token: token,  // ✅ clave que espera el frontend
         user: {
           id: user.id,
           name: user.name,
