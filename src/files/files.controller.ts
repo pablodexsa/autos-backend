@@ -2,8 +2,7 @@ import { Controller, Post, UploadedFile, UseInterceptors } from '@nestjs/common'
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
-import type {File as MulterFile } from 'multer';
-
+import type * as Multer from 'multer';
 
 @Controller('files')
 export class FilesController {
@@ -17,7 +16,7 @@ export class FilesController {
       }
     })
   }))
-  uploadFile(@UploadedFile() file: MulterFile) {
+  uploadFile(@UploadedFile() file: Multer.File) {
     return { filename: file.filename, path: file.path };
   }
 }
