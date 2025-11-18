@@ -1,231 +1,298 @@
-﻿import {
-  Injectable,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
+﻿import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { Sale } from './sale.entity';
+import { CreateSaleDto } from './dto/create-sale.dto';
 import { Vehicle } from '../vehicles/vehicle.entity';
+import { Reservation } from '../reservations/reservation.entity';
+import { Installment } from '../installments/installment.entity';
 import { Client } from '../clients/entities/client.entity';
-import { User } from '../users/user.entity';
+import PDFDocument from 'pdfkit'; // ✅ Import corregido
 import * as fs from 'fs';
 import * as path from 'path';
-import PDFDocument from 'pdfkit';
+
+function pmnt(p: number, r: number, n: number) {
+  // Fórmula de amortización (cuota fija)
+  if (r === 0) return p / n;
+  return (p * r) / (1 - Math.pow(1 + r, -n));
+}
+
+function yyyymmToDate(yyyymm: string, day: number): Date {
+  const [y, m] = yyyymm.split('-').map(Number);
+  return new Date(y, m - 1, day, 12, 0, 0);
+}
 
 @Injectable()
 export class SalesService {
   constructor(
-    @InjectRepository(Sale)
-    private repo: Repository<Sale>,
-
-    @InjectRepository(Vehicle)
-    private vehicleRepo: Repository<Vehicle>,
-
-    @InjectRepository(Client)
-    private clientRepo: Repository<Client>,
-
-    @InjectRepository(User)
-    private userRepo: Repository<User>,
+    @InjectRepository(Sale) private readonly salesRepo: Repository<Sale>,
+    @InjectRepository(Vehicle) private readonly vehicleRepo: Repository<Vehicle>,
+    @InjectRepository(Reservation) private readonly resRepo: Repository<Reservation>,
+    @InjectRepository(Installment) private readonly instRepo: Repository<Installment>,
+    @InjectRepository(Client) private readonly clientRepo: Repository<Client>,
   ) {}
 
-  // ✅ Obtener todas las ventas (con relaciones)
-  async findAll() {
-    return this.repo.find({
-      relations: ['vehicle', 'client', 'seller'],
-      order: { id: 'DESC' },
+  // 🔍 Vehículos disponibles o reservados por DNI
+  async eligibleVehiclesForDni(dni?: string) {
+    const available = await this.vehicleRepo.find({
+      where: { status: In(['Available', 'available']) },
     });
+
+    if (!dni) return available;
+
+    // Buscar reservas aceptadas por cliente
+    const acceptedRes = await this.resRepo.find({
+      where: {
+        client: { dni },
+        status: In(['Accepted', 'accepted']),
+      },
+      relations: ['vehicle', 'client'],
+    });
+
+    const reservedVehicles = acceptedRes.map((r) => r.vehicle).filter(Boolean);
+    const map = new Map<number, Vehicle>();
+    for (const v of [...available, ...reservedVehicles]) map.set(v.id, v);
+    return Array.from(map.values());
   }
 
-  async findOne(id: number) {
-    const sale = await this.repo.findOne({
-      where: { id },
-      relations: ['vehicle', 'client', 'seller'],
-    });
-    if (!sale) throw new NotFoundException('Venta no encontrada');
-    return sale;
-  }
-
-  // ✅ Crear una venta nueva + PDF automático
-async create(dto: any): Promise<Sale> {
-  try {
-    console.log('🚀 DTO recibido en create():', dto);
-
-    // 🔹 Buscar entidades relacionadas
+  // 🧾 Crear nueva venta
+  async create(dto: CreateSaleDto) {
     const vehicle = await this.vehicleRepo.findOne({ where: { id: dto.vehicleId } });
-    const client = await this.clientRepo.findOne({ where: { id: dto.clientId } });
-    const seller = dto.sellerId
-      ? await this.userRepo.findOne({ where: { id: dto.sellerId } })
-      : null;
+    if (!vehicle) throw new NotFoundException('Vehicle not found');
 
-    if (!vehicle) throw new Error('Vehículo no encontrado');
-    if (!client) throw new Error('Cliente no encontrado');
+    const client = await this.clientRepo.findOne({ where: { dni: dto.clientDni } });
 
-    // 🔹 Crear instancia de venta (usando tipado seguro)
-    const sale = this.repo.create({
-      vehicle,
-      client,
-      seller: seller ?? undefined,
-      saleType: dto.saleType || 'contado',
-      saleDate: dto.saleDate ? new Date(dto.saleDate) : new Date(),
-      finalPrice: Number(dto.finalPrice ?? 0),
-      downPayment: dto.downPayment ? Number(dto.downPayment) : null,
-      installments: dto.installments ? Number(dto.installments) : null,
-      installmentValue: dto.installmentValue ? Number(dto.installmentValue) : null,
-      status: 'active',
-    } as Partial<Sale>);
+    const sale = this.salesRepo.create({
+      ...dto,
+      client: client ?? undefined,
+      paymentComposition: {
+        hasAdvance: (dto.downPayment ?? 0) > 0,
+        hasPrendario: (dto.prendarioAmount ?? 0) > 0 && (dto.prendarioInstallments ?? 0) > 0,
+        hasPersonal: (dto.personalAmount ?? 0) > 0 && (dto.personalInstallments ?? 0) > 0,
+        hasFinancing: (dto.inHouseAmount ?? 0) > 0 && (dto.inHouseInstallments ?? 0) > 0,
+      },
+    });
 
-    // 🔹 Guardar venta (garantizado objeto, no array)
-    const saved: Sale = await this.repo.save(sale);
-
-    console.log('✅ Venta registrada correctamente con ID:', saved.id);
-
-    // 🔹 Marcar vehículo como vendido
-    vehicle.sold = true;
-    vehicle.status = 'sold';
+    const saved = await this.salesRepo.save(sale);
+    vehicle.status = 'Sold';
     await this.vehicleRepo.save(vehicle);
 
-    // 🔹 Generar recibo PDF
-    await this.generateReceiptPDF(saved);
+// 💳 Generar plan de pagos (financiación interna)
+const inHouseAmount = dto.inHouseAmount ?? 0;
+const inHouseInstallments = dto.inHouseInstallments ?? 0;
+const inHouseRate = dto.inHouseMonthlyRate ?? 0; // hoy viene 0
 
-    return saved;
-  } catch (error) {
-    console.error('❌ Error al registrar venta:', error);
-    throw new Error(error.message || 'Error inesperado al registrar la venta');
+if (inHouseAmount > 0 && inHouseInstallments > 0) {
+  // Si la tasa es 0 → monto / cuotas
+  const installmentValue = parseFloat(
+    pmnt(inHouseAmount, inHouseRate, inHouseInstallments).toFixed(2),
+  );
+
+  const baseDate = yyyymmToDate(dto.initialPaymentMonth, dto.paymentDay);
+
+  for (let i = 0; i < inHouseInstallments; i++) {
+    const due = new Date(
+      baseDate.getFullYear(),
+      baseDate.getMonth() + i,
+      dto.paymentDay,
+      12,
+      0,
+      0,
+    );
+
+    const inst = this.instRepo.create({
+      sale: saved,                               // Relación CORRECTA
+      saleId: saved.id,
+      client: client ?? null,                    // Cliente asociado
+      concept: 'PERSONAL_FINANCING',             // Mantengo tu concepto
+      amount: installmentValue,
+      dueDate: due,
+      paid: false,
+      status: 'PENDING',
+    } as Partial<Installment>);
+
+    await this.instRepo.save(inst);
   }
 }
 
-  // ✅ Generador de PDF de recibo profesional
-  private async generateReceiptPDF(sale: Sale) {
-    const receiptsDir = path.join(__dirname, '../../uploads/receipts');
-    if (!fs.existsSync(receiptsDir)) fs.mkdirSync(receiptsDir, { recursive: true });
+    return saved;
+  }
 
-    const filePath = path.join(receiptsDir, `receipt_${sale.id}.pdf`);
-    const doc = new PDFDocument({ margin: 50 });
-
-    const stream = fs.createWriteStream(filePath);
-    doc.pipe(stream);
-
-    // --- Encabezado ---
-    doc
-      .fontSize(20)
-      .text('DE GRAZIA AUTOMOTORES', { align: 'center' })
-      .moveDown(0.5);
-    doc
-      .fontSize(12)
-      .text('Recibo oficial de venta', { align: 'center' })
-      .text(`Fecha de emisión: ${new Date().toLocaleString('es-AR')}`, {
-        align: 'center',
-      })
-      .moveDown(1);
-
-    doc
-      .moveTo(50, 110)
-      .lineTo(550, 110)
-      .strokeColor('#00bfa5')
-      .stroke();
-
-    // --- Datos principales ---
-    doc
-      .fontSize(12)
-      .text(`🧾 ID de Venta: ${sale.id}`)
-      .text(
-        `📅 Fecha de Venta: ${new Date(sale.saleDate).toLocaleDateString('es-AR')}`,
-      )
-      .text(`💳 Tipo de Venta: ${sale.saleType}`)
-      .moveDown(1);
-
-    // --- Cliente y Vendedor ---
-    const clientName = sale.client
-      ? `${sale.client.firstName} ${sale.client.lastName} (DNI: ${sale.client.dni})`
-      : 'No registrado';
-const sellerName = sale.seller
-  ? sale.seller.name
-  : 'No asignado';
-
-
-    doc
-      .text(`🧍‍♂️ Cliente: ${clientName}`)
-      .text(`👨‍💼 Vendedor: ${sellerName}`)
-      .moveDown(1);
-
-    // --- Vehículo ---
-    const vehiculo = sale.vehicle;
-    doc
-      .fontSize(12)
-      .text('🚗 Detalles del Vehículo:')
-      .moveDown(0.3)
-      .fontSize(11)
-      .text(`Marca: ${vehiculo.brand}`)
-      .text(`Modelo: ${vehiculo.model}`)
-      .text(`Versión: ${vehiculo.versionName}`)
-      .text(`Patente: ${vehiculo.plate}`)
-      .text(`Precio Base: $${vehiculo.price.toLocaleString('es-AR')}`)
-      .moveDown(1);
-
-    // --- Totales ---
-    doc
-      .fontSize(12)
-      .text('💰 Resumen de la Venta:')
-      .moveDown(0.3)
-      .fontSize(11)
-      .text(
-        `Anticipo: ${
-          sale.downPayment ? `$${sale.downPayment.toLocaleString('es-AR')}` : '-'
-        }`,
-      )
-      .text(
-        `Cantidad de Cuotas: ${
-          sale.installments ? sale.installments : '-'
-        }`,
-      )
-      .text(
-        `Valor por Cuota: ${
-          sale.installmentValue
-            ? `$${sale.installmentValue.toLocaleString('es-AR')}`
-            : '-'
-        }`,
-      )
-      .moveDown(0.5)
-      .fontSize(12)
-      .fillColor('#00bfa5')
-      .text(
-        `💵 TOTAL FINAL: $${(sale.finalPrice || 0).toLocaleString('es-AR')}`,
-        { align: 'right' },
-      )
-      .fillColor('black')
-      .moveDown(1);
-
-    // --- Pie de página ---
-    doc
-      .fontSize(9)
-      .fillColor('#555')
-      .text(
-        'De Grazia Automotores | Av. Siempre Viva 123 | Tel: (000) 123-4567',
-        { align: 'center' },
-      )
-      .text('Este recibo es válido como comprobante interno de venta.', {
-        align: 'center',
-      });
-
-    doc.end();
-
-    return new Promise<void>((resolve, reject) => {
-      stream.on('finish', () => resolve());
-      stream.on('error', (err) => reject(err));
+  // 📋 Listar todas las ventas
+  async findAll() {
+    return this.salesRepo.find({
+      order: { createdAt: 'DESC' },
+      relations: ['vehicle', 'client'],
     });
   }
 
-  // ✅ Actualizar una venta
-  async update(id: number, dto: any) {
-    const sale = await this.findOne(id);
-    Object.assign(sale, dto);
-    return this.repo.save(sale);
+  // 🔎 Buscar una venta
+  async findOne(id: number) {
+    const sale = await this.salesRepo.findOne({
+      where: { id },
+      relations: ['vehicle', 'client'],
+    });
+    if (!sale) throw new NotFoundException('Sale not found');
+    return sale;
   }
 
-  // ✅ Eliminar una venta
-  async remove(id: number) {
+  // 🖨️ Generar comprobante de venta profesional
+  async getPdf(id: number): Promise<Buffer> {
     const sale = await this.findOne(id);
-    return this.repo.remove(sale);
+
+    const dir = path.join(__dirname, '../../uploads/sales', String(sale.id));
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, `venta_${sale.id}.pdf`);
+
+    const doc = new PDFDocument({ margin: 50 });
+    const chunks: Buffer[] = [];
+    doc.on('data', (c) => chunks.push(c));
+    const done = new Promise<Buffer>((resolve) =>
+      doc.on('end', () => resolve(Buffer.concat(chunks))),
+    );
+
+    try {
+      const logoPath = path.join(__dirname, '../../logos/Logobyn.JPG');
+      if (fs.existsSync(logoPath)) {
+        doc.opacity(0.07).image(logoPath, 100, 180, { fit: [400, 400], align: 'center' });
+        doc.opacity(1);
+      }
+    } catch {
+      console.warn('⚠️ No se pudo cargar el logo de marca de agua');
+    }
+
+    // 🏷️ Encabezado
+    doc.fontSize(22).fillColor('#1e1e1e').text('DE GRAZIA AUTOMOTORES', { align: 'center' });
+    doc.fontSize(12).fillColor('#555').text('Comprobante de Venta', { align: 'center' });
+    doc
+      .fontSize(10)
+      .fillColor('#777')
+      .text(`Emitido el ${new Date().toLocaleDateString('es-AR')}`, { align: 'center' });
+    doc.moveDown(1);
+    doc.moveTo(50, doc.y).lineTo(550, doc.y).strokeColor('#009879').stroke();
+    doc.moveDown(1);
+
+    // Helpers
+    const sectionTitle = (t: string) => {
+      doc.moveDown(0.6);
+      doc.fontSize(13).fillColor('#009879').text(t.toUpperCase(), { underline: true });
+      doc.moveDown(0.3);
+      doc.fontSize(11).fillColor('#1e1e1e');
+    };
+
+    const formatPesos = (valor?: number | null): string => {
+      if (valor == null) return '-';
+      return `$ ${valor.toLocaleString('es-AR', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })}`;
+    };
+
+    // 📋 Datos de la venta
+    sectionTitle('Datos de la Venta');
+    doc.text(`Número: ${sale.id}`);
+    doc.text(`Fecha: ${new Date(sale.createdAt).toLocaleDateString('es-AR')}`);
+    doc.text(`Forma de Pago: ${this.labelPayment(sale.paymentComposition) || '-'}`);
+    if (sale.personalInstallments)
+      doc.text(`Cantidad de Cuotas Totales: ${sale.personalInstallments}`);
+    doc.text(`Día de Pago: ${sale.paymentDay}`);
+    doc.text(`Mes Inicial de Pago: ${sale.initialPaymentMonth}`);
+
+    // 💸 Montos principales
+    sectionTitle('Detalle de Montos');
+    if (sale.downPayment != null) doc.text(`Anticipo: ${formatPesos(sale.downPayment)}`);
+    if (sale.tradeInValue != null) doc.text(`Valor de Permuta: ${formatPesos(sale.tradeInValue)}`);
+    if (sale.basePrice != null) doc.text(`Precio Lista: ${formatPesos(sale.basePrice)}`);
+    if (sale.balance != null) doc.text(`Saldo (vehículo - permuta): ${formatPesos(sale.balance)}`);
+    if (sale.finalPrice != null) doc.text(`Precio Final de Venta: ${formatPesos(sale.finalPrice)}`);
+
+    // 💰 Detalle de préstamos y financiaciones
+    const hasLoans =
+      !!sale.prendarioAmount || !!sale.personalAmount || !!sale.inHouseAmount;
+
+    if (hasLoans) {
+      sectionTitle('Detalle de Préstamos y Financiaciones');
+
+      if (sale.prendarioAmount && sale.prendarioAmount > 0) {
+        doc.moveDown(0.5);
+        doc.fontSize(12).fillColor('#009879').text('Préstamo Prendario');
+        doc.fontSize(11).fillColor('#000');
+        doc.text(`Monto (neto): ${formatPesos(sale.prendarioAmount)}`);
+        doc.text(`Cuotas: ${sale.prendarioInstallments ?? '-'}`);
+      }
+
+      if (sale.personalAmount && sale.personalAmount > 0) {
+        doc.moveDown(0.5);
+        doc.fontSize(12).fillColor('#009879').text('Préstamo Personal');
+        doc.fontSize(11).fillColor('#000');
+        doc.text(`Monto (neto): ${formatPesos(sale.personalAmount)}`);
+        doc.text(`Cuotas: ${sale.personalInstallments ?? '-'}`);
+      }
+
+      if (sale.inHouseAmount && sale.inHouseAmount > 0) {
+        doc.moveDown(0.5);
+        doc.fontSize(12).fillColor('#009879').text('Financiación Personal');
+        doc.fontSize(11).fillColor('#000');
+        doc.text(`Monto (neto): ${formatPesos(sale.inHouseAmount)}`);
+        doc.text(`Cuotas: ${sale.inHouseInstallments ?? '-'}`);
+      }
+
+      if (
+        sale.paymentComposition?.hasFinancing &&
+        sale.inHouseAmount > 0 &&
+        sale.inHouseInstallments > 0
+      ) {
+        doc.moveDown(0.8);
+        doc.fontSize(12).fillColor('#009879').text('Detalle de Cuotas Financiación Personal');
+        doc.fontSize(11).fillColor('#000');
+        doc.text(`Cantidad de Cuotas: ${sale.inHouseInstallments}`);
+        const valorCuota = sale.inHouseAmount / sale.inHouseInstallments;
+        doc.text(`Valor de cada cuota: ${formatPesos(valorCuota)}`);
+      }
+    }
+
+    // 👤 Cliente
+    sectionTitle('Cliente');
+    doc.text(`Nombre: ${sale.clientName}`);
+    doc.text(`DNI: ${sale.clientDni}`);
+
+    // 🚗 Vehículo
+    if (sale.vehicle) {
+      sectionTitle('Vehículo');
+      doc.text(`${sale.vehicle.brand} ${sale.vehicle.model} ${sale.vehicle.versionName || ''}`);
+      if (sale.vehicle.year) doc.text(`Año: ${sale.vehicle.year}`);
+      if (sale.vehicle.color) doc.text(`Color: ${sale.vehicle.color}`);
+      if (sale.vehicle.plate) doc.text(`Patente: ${sale.vehicle.plate}`);
+    }
+
+    // ⚖️ Condiciones legales
+    doc.moveDown(2);
+    doc.moveTo(50, doc.y).lineTo(550, doc.y).strokeColor('#ccc').stroke();
+    doc.moveDown(1);
+    doc
+      .fontSize(13)
+      .fillColor('#009879')
+      .text('CONDICIONES LEGALES Y COMERCIALES', { underline: true });
+    doc.moveDown(0.5);
+    const legales = `
+1. El presente comprobante acredita la venta del vehículo según condiciones pactadas.
+2. La financiación personal, en caso de corresponder, se ajustará al plan seleccionado.
+3. Las condiciones de entrega, plazos y documentación complementaria serán notificadas al cliente.
+`;
+    doc.fontSize(8.5).fillColor('#555').text(legales, { align: 'justify', lineGap: 2.5 });
+
+    doc.end();
+    await done;
+    const pdfBuffer = Buffer.concat(chunks);
+    fs.writeFileSync(filePath, pdfBuffer);
+    return pdfBuffer;
+  }
+
+  private labelPayment(comp?: any): string {
+    if (!comp) return '-';
+    if (comp.hasFinancing) return 'Anticipo + Prendario + Personal + Financiación';
+    if (comp.hasPersonal) return 'Anticipo + Prendario + Personal';
+    if (comp.hasPrendario) return 'Anticipo + Préstamo Prendario';
+    return 'Contado';
   }
 }

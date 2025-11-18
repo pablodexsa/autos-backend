@@ -1,4 +1,4 @@
-import {
+﻿import {
   Entity,
   PrimaryGeneratedColumn,
   Column,
@@ -6,6 +6,7 @@ import {
   OneToMany,
   CreateDateColumn,
   UpdateDateColumn,
+  JoinColumn,
 } from 'typeorm';
 import { Sale } from '../sales/sale.entity';
 import { InstallmentPayment } from '../installment-payments/installment-payment.entity';
@@ -16,20 +17,34 @@ export class Installment {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @ManyToOne(() => Sale, (sale) => sale.id, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Sale, (sale) => sale.installments, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'saleId' })
   sale: Sale;
 
+  @Column({ nullable: true })
+  saleId: number;
+
   @ManyToOne(() => Client, { onDelete: 'CASCADE', nullable: true })
-  client: Client;
+  @JoinColumn({ name: 'clientId' })
+  client?: Client | null;
+
+  @Column({ nullable: true })
+  clientId?: number | null;
 
   @Column('decimal', { precision: 12, scale: 2 })
   amount: number;
 
-  @Column({ type: 'date' })
-  dueDate: string;
+  @Column({ type: 'timestamp' })
+  dueDate: Date;
 
   @Column({ default: false })
   paid: boolean;
+
+  @Column({ default: 'PENDING' })
+  status: string;
+
+  @Column({ nullable: true })
+  concept: string;
 
   @OneToMany(() => InstallmentPayment, (payment) => payment.installment)
   payments: InstallmentPayment[];

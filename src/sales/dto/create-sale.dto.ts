@@ -1,17 +1,97 @@
-﻿import { IsNumber, IsOptional, IsPositive, IsString } from 'class-validator';
+﻿import {
+  IsBoolean,
+  IsInt,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+  MaxLength,
+} from 'class-validator';
 
 export class CreateSaleDto {
-  @IsNumber()
+  // 🧍 Cliente
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(32)
+  clientDni: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(160)
+  clientName: string;
+
+  // 🚗 Vehículo
+  @IsInt()
+  @Min(1)
   vehicleId: number;
 
+  // 💰 Precios y pagos
   @IsNumber()
-  clientId: number;
+  basePrice: number;
+
+  @IsBoolean()
+  hasTradeIn: boolean;
 
   @IsNumber()
-  @IsPositive()
-  amount: number;
-
   @IsOptional()
+  tradeInValue?: number;
+
+  @IsNumber()
+  @IsOptional()
+  downPayment?: number;
+
+  // 🏦 Prendario
+  @IsNumber()
+  @IsOptional()
+  prendarioAmount?: number;
+
+  @IsInt()
+  @IsOptional()
+  prendarioInstallments?: number;
+
+  @IsNumber()
+  @IsOptional()
+  prendarioMonthlyRate?: number;
+
+  // 💳 Personal
+  @IsNumber()
+  @IsOptional()
+  personalAmount?: number;
+
+  @IsInt()
+  @IsOptional()
+  personalInstallments?: number;
+
+  @IsNumber()
+  @IsOptional()
+  personalMonthlyRate?: number;
+
+  // 🏠 Financiación de la casa
+  @IsNumber()
+  @IsOptional()
+  inHouseAmount?: number;
+
+  @IsInt()
+  @IsOptional()
+  inHouseInstallments?: number;
+
+  @IsNumber()
+  @IsOptional()
+  inHouseMonthlyRate?: number;
+
+  // 📊 Totales
+  @IsNumber()
+  finalPrice: number;
+
+  @IsNumber()
+  balance: number;
+
+  // 📅 Nuevos campos
+  @IsInt()
+  paymentDay: number; // 5, 10, 15, 30
+
   @IsString()
-  status?: string; // e.g. "completed" | "pending" | "canceled"
+  @IsNotEmpty()
+  initialPaymentMonth: string; // "YYYY-MM"
 }

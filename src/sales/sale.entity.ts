@@ -4,71 +4,116 @@
   Column,
   ManyToOne,
   OneToMany,
-  CreateDateColumn,
-  UpdateDateColumn,
   JoinColumn,
+  CreateDateColumn,
 } from 'typeorm';
 import { Vehicle } from '../vehicles/vehicle.entity';
 import { Client } from '../clients/entities/client.entity';
 import { Installment } from '../installments/installment.entity';
-import { User } from '../users/user.entity'; // 👈 vendedor
+
+export type PaymentComposition = {
+  hasAdvance: boolean;
+  hasPrendario: boolean;
+  hasPersonal: boolean;
+  hasFinancing: boolean;
+};
 
 @Entity({ name: 'sales' })
 export class Sale {
   @PrimaryGeneratedColumn()
   id: number;
 
-  // 🔹 Cliente asociado a la venta
-  @ManyToOne(() => Client, (client) => client.sales, { onDelete: 'CASCADE', eager: true })
+  // 🧍 Cliente
+@Column({ type: 'varchar', length: 32, nullable: true })
+clientDni: string;
+
+@Column({ type: 'varchar', length: 160, nullable: true })
+clientName: string;
+
+
+  @ManyToOne(() => Client, (client) => client.sales, {
+    onDelete: 'SET NULL',
+    eager: true,
+    nullable: true,
+  })
   @JoinColumn({ name: 'clientId' })
   client: Client;
 
-  // 🔹 Vehículo vendido
-  @ManyToOne(() => Vehicle, { eager: true, onDelete: 'CASCADE' })
+  // 🚗 Vehículo
+  @Column()
+  vehicleId: number;
+
+  @ManyToOne(() => Vehicle, (vehicle) => vehicle.sales, { eager: true })
   @JoinColumn({ name: 'vehicleId' })
   vehicle: Vehicle;
 
-  // 🔹 Vendedor (usuario del sistema)
-  @ManyToOne(() => User, { eager: true, onDelete: 'SET NULL', nullable: true })
-  @JoinColumn({ name: 'sellerId' })
-  seller: User;
+  // 💰 Precios
+  @Column('decimal', { precision: 12, scale: 2, default: 0 })
+  basePrice: number;
 
-  // 🔹 Tipo de venta: contado / cuotas / anticipo + cuotas
-  @Column({ length: 30 })
-  saleType: string;
+  @Column({ default: false })
+  hasTradeIn: boolean;
 
-  // 🔹 Precio final de la venta
-  @Column('decimal', { precision: 12, scale: 2 })
+  @Column('decimal', { precision: 12, scale: 2, default: 0 })
+  tradeInValue: number;
+
+  @Column('decimal', { precision: 12, scale: 2, default: 0 })
+  downPayment: number; // Anticipo
+
+  // 🏦 Prendario
+  @Column('decimal', { precision: 12, scale: 2, default: 0 })
+  prendarioAmount: number;
+
+  @Column('int', { default: 0 })
+  prendarioInstallments: number;
+
+  @Column('decimal', { precision: 6, scale: 4, default: 0 })
+  prendarioMonthlyRate: number; // e.g. 0.025 = 2.5%
+
+  // 💳 Personal
+  @Column('decimal', { precision: 12, scale: 2, default: 0 })
+  personalAmount: number;
+
+  @Column('int', { default: 0 })
+  personalInstallments: number;
+
+  @Column('decimal', { precision: 6, scale: 4, default: 0 })
+  personalMonthlyRate: number;
+
+  // 🏠 Financiación interna (de la casa)
+  @Column('decimal', { precision: 12, scale: 2, default: 0 })
+  inHouseAmount: number;
+
+  @Column('int', { default: 0 })
+  inHouseInstallments: number;
+
+  @Column('decimal', { precision: 6, scale: 4, default: 0 })
+  inHouseMonthlyRate: number;
+
+  // 💵 Totales
+  @Column('decimal', { precision: 12, scale: 2, default: 0 })
   finalPrice: number;
 
-  // 🔹 Monto de anticipo (si aplica)
-  @Column('decimal', { precision: 12, scale: 2, nullable: true })
-  downPayment: number;
+  @Column('decimal', { precision: 12, scale: 2, default: 0 })
+  balance: number;
 
-  // 🔹 Cantidad de cuotas
-  @Column({ type: 'int', nullable: true })
-  installments: number;
+  // 📅 Campos nuevos solicitados
+  @Column('int', { default: 5 })
+  paymentDay: number; // 5, 10, 15, 30
 
-  // 🔹 Valor de cada cuota (ya con incremento aplicado)
-  @Column('decimal', { precision: 12, scale: 2, nullable: true })
-  installmentValue: number;
+  @Column({ length: 7 })
+  initialPaymentMonth: string; // "2025-12"
 
-  // 🔹 Estado general de la venta
-  @Column({ length: 20, default: 'active' }) // active | paid | canceled
-  status: string;
+  // ⚙️ Composición del pago (flags)
+  @Column('simple-json', { nullable: true })
+  paymentComposition: PaymentComposition | null;
 
-  // 🔹 Fecha de la venta (registrada manualmente)
-  @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
-  saleDate: Date;
+  // 📆 Relación con cuotas (opcional)
+  @OneToMany(() => Installment, (installment) => installment.sale, {
+    cascade: true,
+  })
+  installments: Installment[];
 
-  // 🔹 Relación con cuotas generadas
-  @OneToMany(() => Installment, (installment) => installment.sale, { cascade: true })
-  installmentsList: Installment[];
-
-  // 🔹 Fecha de creación / actualización
   @CreateDateColumn()
   createdAt: Date;
-
-  @UpdateDateColumn()
-  updatedAt: Date;
 }

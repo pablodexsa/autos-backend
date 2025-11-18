@@ -2,110 +2,58 @@
   Controller,
   Get,
   Post,
-  Patch,
-  Delete,
-  Param,
   Body,
+  Query,
+  Param,
   ParseIntPipe,
-  HttpException,
-  HttpStatus,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express'; // ✅ Importación corregida
 import { SalesService } from './sales.service';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { CreateSaleDto } from './dto/create-sale.dto';
 
-@ApiTags('Sales')
 @Controller('sales')
 export class SalesController {
   constructor(private readonly salesService: SalesService) {}
 
-  // ✅ Obtener todas las ventas
-  @Get()
-  @ApiOperation({ summary: 'Listar todas las ventas' })
-  @ApiResponse({ status: 200, description: 'Lista de ventas obtenida correctamente' })
-  async findAll() {
-    try {
-      return await this.salesService.findAll();
-    } catch (error) {
-      throw new HttpException(
-        'Error al obtener las ventas',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+  // 🔍 Vehículos elegibles
+  @Get('eligible-vehicles')
+  eligible(@Query('dni') dni?: string) {
+    return this.salesService.eligibleVehiclesForDni(dni);
   }
 
-  // ✅ Obtener una venta específica
-  @Get(':id')
-  @ApiOperation({ summary: 'Obtener una venta por ID' })
-  @ApiResponse({ status: 200, description: 'Venta encontrada correctamente' })
-  async findOne(@Param('id', ParseIntPipe) id: number) {
-    try {
-      return await this.salesService.findOne(id);
-    } catch {
-      throw new HttpException(
-        'La venta no existe o hubo un error al obtenerla',
-        HttpStatus.NOT_FOUND,
-      );
-    }
-  }
-
-  // ✅ Crear una nueva venta (corregido)
+  // 🧾 Crear venta
   @Post()
-  @ApiOperation({ summary: 'Registrar una nueva venta' })
-  @ApiResponse({ status: 201, description: 'Venta registrada correctamente' })
-  async create(@Body() body: any) {
-    try {
-      console.log('📦 Datos recibidos en /sales:', body);
+  create(@Body() dto: CreateSaleDto) {
+    return this.salesService.create(dto);
+  }
 
-      const newSale = await this.salesService.create({
-        clientId: Number(body.clientId),
-        vehicleId: Number(body.vehicleId),
-        sellerId: Number(body.sellerId),
-        saleDate: body.saleDate ? new Date(body.saleDate) : new Date(),
-        saleType: body.saleType || body.paymentType || 'contado',
-        finalPrice: Number(body.finalPrice || body.salePrice || 0),
-        downPayment: body.downPayment ? Number(body.downPayment) : null,
-        installments: body.installments ? Number(body.installments) : null,
-        installmentValue: body.installmentValue
-          ? Number(body.installmentValue)
-          : null,
+  // 📋 Listar ventas
+  @Get()
+  findAll() {
+    return this.salesService.findAll();
+  }
+
+  // 🔎 Obtener una venta
+  @Get(':id')
+  findOne(@Param('id', ParseIntPipe) id: number) {
+    return this.salesService.findOne(id);
+  }
+
+  // 🖨️ Descargar comprobante PDF
+  @Get(':id/pdf')
+  async getPdf(@Param('id', ParseIntPipe) id: number, @Res() res: Response) {
+    try {
+      const pdfBuffer = await this.salesService.getPdf(id);
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `inline; filename="venta_${id}.pdf"`,
+        'Content-Length': pdfBuffer.length,
       });
-
-      console.log('✅ Venta registrada correctamente:', newSale?.id || '(sin ID)');
-      return newSale;
-    } catch (error) {
-      console.error('❌ Error al registrar venta:', error);
-      throw new HttpException(
-        error.message || 'Error al registrar la venta',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-  }
-
-  // ✅ Actualizar una venta
-  @Patch(':id')
-  @ApiOperation({ summary: 'Actualizar una venta existente' })
-  async update(@Param('id', ParseIntPipe) id: number, @Body() body: any) {
-    try {
-      return await this.salesService.update(id, body);
-    } catch (error) {
-      throw new HttpException(
-        error.message || 'Error al actualizar la venta',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-  }
-
-  // ✅ Eliminar una venta
-  @Delete(':id')
-  @ApiOperation({ summary: 'Eliminar una venta' })
-  async remove(@Param('id', ParseIntPipe) id: number) {
-    try {
-      return await this.salesService.remove(id);
-    } catch (error) {
-      throw new HttpException(
-        error.message || 'Error al eliminar la venta',
-        HttpStatus.BAD_REQUEST,
-      );
+      res.end(pdfBuffer);
+    } catch (err) {
+      console.error('❌ Error generando PDF:', err);
+      res.status(500).json({ message: 'Error generando PDF de la venta' });
     }
   }
 }

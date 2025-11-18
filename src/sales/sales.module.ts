@@ -1,22 +1,28 @@
-﻿import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { Sale } from './sale.entity';
 import { SalesService } from './sales.service';
 import { SalesController } from './sales.controller';
-import { Sale } from './sale.entity';
 import { Vehicle } from '../vehicles/vehicle.entity';
-import { Client } from '../clients/entities/client.entity';
+import { Reservation } from '../reservations/reservation.entity';
 import { Installment } from '../installments/installment.entity';
-import { User } from '../users/user.entity'; // ✅ se agregó para poder inyectar UserRepository
+import { Client } from '../clients/entities/client.entity';
+import { InstallmentsModule } from '../installments/installments.module';
+import { ClientsModule } from '../clients/clients.module';
+import { VehiclesModule } from '../vehicles/vehicles.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([
-      Sale,          // Entidad principal
-      Vehicle,       // Vehículo asociado
-      Client,        // Cliente comprador
-      Installment,   // Cuotas generadas
-      User,          // ✅ Vendedor (usuario del sistema)
+      Sale,
+      Vehicle,
+      Reservation,
+      Installment,
+      Client,
     ]),
+    forwardRef(() => InstallmentsModule),
+    forwardRef(() => ClientsModule),
+    forwardRef(() => VehiclesModule),
   ],
   controllers: [SalesController],
   providers: [SalesService],
