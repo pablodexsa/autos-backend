@@ -9,7 +9,7 @@ import { User } from '../users/user.entity';
 import * as fs from 'fs';
 import * as path from 'path';
 import PDFDocument from 'pdfkit';
-import type { File as MulterFile } from 'multer';
+import type * as Multer from 'multer';
 
 
 const pesos = (n: number) =>
@@ -238,7 +238,7 @@ export class ReservationsService {
   async addGuarantor(
     reservationId: number,
     data: { firstName: string; lastName: string; dni: string; address?: string; phone?: string },
-    files: { dniFile?: MulterFile[]; payslipFile?: MulterFile[] },
+    files: { dniFile?: Multer.File[]; payslipFile?: Multer.File[] },
   ) {
     const reservation = await this.findOne(reservationId);
     if (!reservation) throw new NotFoundException('Reserva no encontrada');
