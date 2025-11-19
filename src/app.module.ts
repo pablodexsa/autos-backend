@@ -44,41 +44,36 @@ import { Brand } from './brands/brand.entity';
 import { Model } from './models/model.entity';
 import { Version } from './versions/version.entity';
 
-
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
     ReservationsModule,
 
-    // ✅ Conexión PostgreSQL (Neon.tech)
-TypeOrmModule.forRoot({
-  type: 'postgres',
-  host: process.env.DB_HOST || 'ep-gentle-poetry-acsrhj0f-pooler.sa-east-1.aws.neon.tech',
-  port: Number(process.env.DB_PORT) || 5432,
-  username: process.env.DB_USER || 'neondb_owner',
-  password: process.env.DB_PASS || 'npg_LNxq5nAcovp7',
-  database: process.env.DB_NAME || 'neondb',
-  ssl: { rejectUnauthorized: false }, // 🔥 requerido siempre con Neon
-  synchronize: true,
-  autoLoadEntities: true,
-  entities: [
-    User,
-    Role,
-    Vehicle,
-    Client,
-    Sale,
-    Budget,
-    Purchase,
-    Installment,
-    InstallmentPayment,
-    InstallmentSetting,
-    Brand,
-    Model,
-    Version,
-  ],
-}),
-
+    // ✅ Conexión única usando DATABASE_URL (DEV y PROD)
+    TypeOrmModule.forRoot({
+      type: 'postgres',
+      url: process.env.DATABASE_URL,
+      autoLoadEntities: true,
+      ssl: { rejectUnauthorized: false },
+      synchronize: process.env.NODE_ENV !== 'production',
+      logging: process.env.NODE_ENV !== 'production',
+      entities: [
+        User,
+        Role,
+        Vehicle,
+        Client,
+        Sale,
+        Budget,
+        Purchase,
+        Installment,
+        InstallmentPayment,
+        InstallmentSetting,
+        Brand,
+        Model,
+        Version,
+      ],
+    }),
 
     // 📁 Archivos estáticos (uploads)
     ServeStaticModule.forRoot({
@@ -108,12 +103,10 @@ TypeOrmModule.forRoot({
   controllers: [AppController],
   providers: [
     AppService,
-
-{
-  provide: APP_INTERCEPTOR,
-  useClass: AuditInterceptor,
-}
-
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: AuditInterceptor,
+    },
   ],
 })
 export class AppModule {}
