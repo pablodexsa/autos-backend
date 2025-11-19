@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+﻿import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { AuthService } from './auth.service';
@@ -20,9 +20,11 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
         secret:
           configService.get<string>('JWT_SECRET') ||
           'default-secret-key-change-this',
+
         signOptions: {
-          expiresIn:
-            configService.get<string>('JWT_EXPIRES_IN') || '8h',
+          // ⚠ Nest 11 → expiresIn debe ser number | StringValue
+          // Tomamos JWT_EXPIRES_IN como number (segundos)
+          expiresIn: Number(configService.get('JWT_EXPIRES_IN')) || 8 * 60 * 60,
         },
       }),
     }),
