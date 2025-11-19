@@ -17,6 +17,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import PDFDocument from 'pdfkit';
 import { InstallmentPaymentService } from './installment-payment.service';
+import { Multer } from 'multer';
 
 @Controller('installment-payments')
 export class InstallmentPaymentController {
@@ -51,7 +52,7 @@ export class InstallmentPaymentController {
   )
   async create(
     @Body() body: any,
-    @UploadedFile() file?: Express.Multer.File,
+    @UploadedFile() file?: Multer.File,
   ) {
     const dto = {
       installmentId: Number(body.installmentId),

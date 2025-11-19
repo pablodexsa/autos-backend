@@ -6,6 +6,7 @@ import { Installment } from '../installments/installment.entity';
 import { Client } from '../clients/entities/client.entity';
 import * as fs from 'fs';
 import * as path from 'path';
+import { Multer } from 'multer';
 
 @Injectable()
 export class InstallmentPaymentService {
@@ -41,7 +42,7 @@ export class InstallmentPaymentService {
     installmentId: number;
     amount: number;
     paymentDate: string;
-    file?: Express.Multer.File;
+    file?: Multer.File;
   }) {
     const installment = await this.installmentRepo.findOne({
       where: { id: data.installmentId },
