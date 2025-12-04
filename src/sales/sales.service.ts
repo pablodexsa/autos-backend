@@ -7,6 +7,7 @@ import { Vehicle } from '../vehicles/vehicle.entity';
 import { Reservation } from '../reservations/reservation.entity';
 import { Installment } from '../installments/installment.entity';
 import { Client } from '../clients/entities/client.entity';
+import { LoanRate } from '../loan-rates/loan-rate.entity'; // 🆕 import tasas
 import PDFDocument from 'pdfkit'; // ✅ Import corregido
 import * as fs from 'fs';
 import * as path from 'path';
@@ -30,6 +31,7 @@ export class SalesService {
     @InjectRepository(Reservation) private readonly resRepo: Repository<Reservation>,
     @InjectRepository(Installment) private readonly instRepo: Repository<Installment>,
     @InjectRepository(Client) private readonly clientRepo: Repository<Client>,
+    @InjectRepository(LoanRate) private readonly loanRateRepo: Repository<LoanRate>, // 🆕 repo tasas
   ) {}
 
   // 🔍 Vehículos disponibles o reservados por DNI
@@ -44,7 +46,7 @@ export class SalesService {
     const acceptedRes = await this.resRepo.find({
       where: {
         client: { dni },
-        status: In(['Accepted', 'accepted']),
+        status: In(['Accepted', 'accepted', 'Aceptada', 'aceptada']),
       },
       relations: ['vehicle', 'client'],
     });
@@ -77,43 +79,43 @@ export class SalesService {
     vehicle.status = 'Sold';
     await this.vehicleRepo.save(vehicle);
 
-// 💳 Generar plan de pagos (financiación interna)
-const inHouseAmount = dto.inHouseAmount ?? 0;
-const inHouseInstallments = dto.inHouseInstallments ?? 0;
-const inHouseRate = dto.inHouseMonthlyRate ?? 0; // hoy viene 0
+    // 💳 Generar plan de pagos (financiación interna)
+    const inHouseAmount = dto.inHouseAmount ?? 0;
+    const inHouseInstallments = dto.inHouseInstallments ?? 0;
+    const inHouseRate = dto.inHouseMonthlyRate ?? 0; // hoy viene 0
 
-if (inHouseAmount > 0 && inHouseInstallments > 0) {
-  // Si la tasa es 0 → monto / cuotas
-  const installmentValue = parseFloat(
-    pmnt(inHouseAmount, inHouseRate, inHouseInstallments).toFixed(2),
-  );
+    if (inHouseAmount > 0 && inHouseInstallments > 0) {
+      // Si la tasa es 0 → monto / cuotas
+      const installmentValue = parseFloat(
+        pmnt(inHouseAmount, inHouseRate, inHouseInstallments).toFixed(2),
+      );
 
-  const baseDate = yyyymmToDate(dto.initialPaymentMonth, dto.paymentDay);
+      const baseDate = yyyymmToDate(dto.initialPaymentMonth, dto.paymentDay);
 
-  for (let i = 0; i < inHouseInstallments; i++) {
-    const due = new Date(
-      baseDate.getFullYear(),
-      baseDate.getMonth() + i,
-      dto.paymentDay,
-      12,
-      0,
-      0,
-    );
+      for (let i = 0; i < inHouseInstallments; i++) {
+        const due = new Date(
+          baseDate.getFullYear(),
+          baseDate.getMonth() + i,
+          dto.paymentDay,
+          12,
+          0,
+          0,
+        );
 
-    const inst = this.instRepo.create({
-      sale: saved,                               // Relación CORRECTA
-      saleId: saved.id,
-      client: client ?? null,                    // Cliente asociado
-      concept: 'PERSONAL_FINANCING',             // Mantengo tu concepto
-      amount: installmentValue,
-      dueDate: due,
-      paid: false,
-      status: 'PENDING',
-    } as Partial<Installment>);
+        const inst = this.instRepo.create({
+          sale: saved,                               // Relación CORRECTA
+          saleId: saved.id,
+          client: client ?? null,                    // Cliente asociado
+          concept: 'PERSONAL_FINANCING',             // Mantengo tu concepto
+          amount: installmentValue,
+          dueDate: due,
+          paid: false,
+          status: 'PENDING',
+        } as Partial<Installment>);
 
-    await this.instRepo.save(inst);
-  }
-}
+        await this.instRepo.save(inst);
+      }
+    }
 
     return saved;
   }
@@ -134,6 +136,16 @@ if (inHouseAmount > 0 && inHouseInstallments > 0) {
     });
     if (!sale) throw new NotFoundException('Sale not found');
     return sale;
+  }
+
+  // 🆕 Helper: obtener tasa desde la tabla loan_rates
+  private async getRate(
+    type: 'prendario' | 'personal' | 'financiacion',
+    months?: number | null,
+  ): Promise<number> {
+    if (!months) return 0;
+    const row = await this.loanRateRepo.findOne({ where: { type, months } });
+    return row?.rate ?? 0;
   }
 
   // 🖨️ Generar comprobante de venta profesional
@@ -206,19 +218,82 @@ if (inHouseAmount > 0 && inHouseInstallments > 0) {
     if (sale.balance != null) doc.text(`Saldo (vehículo - permuta): ${formatPesos(sale.balance)}`);
     if (sale.finalPrice != null) doc.text(`Precio Final de Venta: ${formatPesos(sale.finalPrice)}`);
 
-    // 💰 Detalle de préstamos y financiaciones
+    // 🧮 Tasas y montos con financiación (similar al preview)
+    const nPrendario = sale.prendarioInstallments ?? 0;
+    const nPersonal = sale.personalInstallments ?? 0;
+    const nFinanc = sale.inHouseInstallments ?? 0;
+
+    const netoPrendario = sale.prendarioAmount ?? 0;
+    const netoPersonal = sale.personalAmount ?? 0;
+    const netoFinanciacion = sale.inHouseAmount ?? 0;
+
+    const tasaPrendario =
+      netoPrendario > 0 && nPrendario > 0
+        ? await this.getRate('prendario', nPrendario)
+        : 0;
+    const tasaPersonal =
+      netoPersonal > 0 && nPersonal > 0
+        ? await this.getRate('personal', nPersonal)
+        : 0;
+    const tasaFinanciacion =
+      netoFinanciacion > 0 && nFinanc > 0
+        ? await this.getRate('financiacion', nFinanc)
+        : 0;
+
+    const prendarioConInteres =
+      netoPrendario > 0 ? netoPrendario * (1 + tasaPrendario / 100) : 0;
+    const personalConInteres =
+      netoPersonal > 0 ? netoPersonal * (1 + tasaPersonal / 100) : 0;
+    const financiacionConInteres =
+      netoFinanciacion > 0 ? netoFinanciacion * (1 + tasaFinanciacion / 100) : 0;
+
+    const totalPrestamosConInteres =
+      prendarioConInteres + personalConInteres + financiacionConInteres;
+
+    // asumimos misma cantidad de cuotas para todos, como en el front
+    const nCuotasGlobal =
+      sale.personalInstallments ||
+      sale.prendarioInstallments ||
+      sale.inHouseInstallments ||
+      0;
+
+    const valorCuotaTotalConInteres =
+      nCuotasGlobal > 0 && totalPrestamosConInteres > 0
+        ? totalPrestamosConInteres / nCuotasGlobal
+        : 0;
+
+	    // 💰 Detalle de préstamos y financiaciones
     const hasLoans =
       !!sale.prendarioAmount || !!sale.personalAmount || !!sale.inHouseAmount;
 
     if (hasLoans) {
       sectionTitle('Detalle de Préstamos y Financiaciones');
 
+      // Cuota total con financiación (global)
+      if (valorCuotaTotalConInteres > 0) {
+        doc.text(
+          `Valor de Cuota total (con financiación): ${formatPesos(
+            valorCuotaTotalConInteres,
+          )}`,
+        );
+        doc.moveDown(0.5);
+      }
+
       if (sale.prendarioAmount && sale.prendarioAmount > 0) {
         doc.moveDown(0.5);
         doc.fontSize(12).fillColor('#009879').text('Préstamo Prendario');
         doc.fontSize(11).fillColor('#000');
         doc.text(`Monto (neto): ${formatPesos(sale.prendarioAmount)}`);
+        if (tasaPrendario) {
+          doc.text(`Tasa aplicada: ${tasaPrendario}%`);
+        }
         doc.text(`Cuotas: ${sale.prendarioInstallments ?? '-'}`);
+        if (prendarioConInteres > 0 && nPrendario > 0) {
+          const cuota = prendarioConInteres / nPrendario;
+          doc.text(
+            `Valor de cada cuota (con financiación): ${formatPesos(cuota)}`,
+          );
+        }
       }
 
       if (sale.personalAmount && sale.personalAmount > 0) {
@@ -226,7 +301,16 @@ if (inHouseAmount > 0 && inHouseInstallments > 0) {
         doc.fontSize(12).fillColor('#009879').text('Préstamo Personal');
         doc.fontSize(11).fillColor('#000');
         doc.text(`Monto (neto): ${formatPesos(sale.personalAmount)}`);
+        if (tasaPersonal) {
+          doc.text(`Tasa aplicada: ${tasaPersonal}%`);
+        }
         doc.text(`Cuotas: ${sale.personalInstallments ?? '-'}`);
+        if (personalConInteres > 0 && nPersonal > 0) {
+          const cuota = personalConInteres / nPersonal;
+          doc.text(
+            `Valor de cada cuota (con financiación): ${formatPesos(cuota)}`,
+          );
+        }
       }
 
       if (sale.inHouseAmount && sale.inHouseAmount > 0) {
@@ -234,9 +318,19 @@ if (inHouseAmount > 0 && inHouseInstallments > 0) {
         doc.fontSize(12).fillColor('#009879').text('Financiación Personal');
         doc.fontSize(11).fillColor('#000');
         doc.text(`Monto (neto): ${formatPesos(sale.inHouseAmount)}`);
+        if (tasaFinanciacion) {
+          doc.text(`Tasa aplicada: ${tasaFinanciacion}%`);
+        }
         doc.text(`Cuotas: ${sale.inHouseInstallments ?? '-'}`);
+        if (financiacionConInteres > 0 && nFinanc > 0) {
+          const cuota = financiacionConInteres / nFinanc;
+          doc.text(
+            `Valor de cada cuota (con financiación): ${formatPesos(cuota)}`,
+          );
+        }
       }
 
+      // 🔁 Detalle de cuotas de la financiación interna (usando monto con interés si existe)
       if (
         sale.paymentComposition?.hasFinancing &&
         sale.inHouseAmount > 0 &&
@@ -246,7 +340,10 @@ if (inHouseAmount > 0 && inHouseInstallments > 0) {
         doc.fontSize(12).fillColor('#009879').text('Detalle de Cuotas Financiación Personal');
         doc.fontSize(11).fillColor('#000');
         doc.text(`Cantidad de Cuotas: ${sale.inHouseInstallments}`);
-        const valorCuota = sale.inHouseAmount / sale.inHouseInstallments;
+
+        const baseFin = financiacionConInteres > 0 ? financiacionConInteres : sale.inHouseAmount;
+        const valorCuota = baseFin / sale.inHouseInstallments;
+
         doc.text(`Valor de cada cuota: ${formatPesos(valorCuota)}`);
       }
     }
@@ -286,7 +383,10 @@ if (inHouseAmount > 0 && inHouseInstallments > 0) {
     const pdfBuffer = Buffer.concat(chunks);
     fs.writeFileSync(filePath, pdfBuffer);
     return pdfBuffer;
-  }
+  fs.writeFileSync(filePath, pdfBuffer);
+  return pdfBuffer;
+}
+
 
   private labelPayment(comp?: any): string {
     if (!comp) return '-';

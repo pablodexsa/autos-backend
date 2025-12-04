@@ -10,6 +10,7 @@ import { Client } from '../clients/entities/client.entity';
 import { InstallmentsModule } from '../installments/installments.module';
 import { ClientsModule } from '../clients/clients.module';
 import { VehiclesModule } from '../vehicles/vehicles.module';
+import { LoanRate } from '../loan-rates/loan-rate.entity';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { VehiclesModule } from '../vehicles/vehicles.module';
       Reservation,
       Installment,
       Client,
+      LoanRate,
     ]),
     forwardRef(() => InstallmentsModule),
     forwardRef(() => ClientsModule),
