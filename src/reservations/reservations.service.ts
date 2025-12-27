@@ -41,19 +41,86 @@ export class ReservationsService {
     return 500000;
   }
 
-  private plusHours(d: Date, hours: number) {
-    return new Date(d.getTime() + hours * 60 * 60 * 1000);
+private readonly AR_TZ = 'America/Argentina/Buenos_Aires';
+
+/**
+ * Feriados configurables.
+ * - AR_HOLIDAYS puede incluir fechas YYYY-MM-DD separadas por coma.
+ *   Ej: "2025-01-01,2025-03-24,2025-12-25"
+ */
+private getHolidaySet(): Set<string> {
+  const raw = (process.env.AR_HOLIDAYS ?? '').trim();
+  const items = raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return new Set(items);
+}
+
+private ymdInTz(date: Date): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: this.AR_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+
+  const y = parts.find((p) => p.type === 'year')?.value ?? '1970';
+  const m = parts.find((p) => p.type === 'month')?.value ?? '01';
+  const d = parts.find((p) => p.type === 'day')?.value ?? '01';
+  return `${y}-${m}-${d}`; // YYYY-MM-DD
+}
+
+private weekdayInTz(date: Date): number {
+  // 0=domingo ... 6=sábado, pero calculado en TZ AR, no en UTC
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: this.AR_TZ,
+    weekday: 'short',
+  }).formatToParts(date);
+
+  const wd = parts.find((p) => p.type === 'weekday')?.value ?? 'Sun';
+  const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return map[wd] ?? 0;
+}
+
+private isBusinessDay(date: Date, holidays: Set<string>): boolean {
+  const wd = this.weekdayInTz(date);
+  if (wd === 0) return false; // domingo NO hábil
+  const ymd = this.ymdInTz(date);
+  if (holidays.has(ymd)) return false; // feriado NO hábil
+  return true; // lunes-sábado hábil
+}
+
+/**
+ * Suma "horas hábiles" (sábado cuenta, domingo y feriados no).
+ * Implementación mínima: avanza de a 1 hora y sólo descuenta cuando cae en día hábil.
+ */
+private plusHours(d: Date, hours: number) {
+  const holidays = this.getHolidaySet();
+  let remaining = hours;
+  let cur = new Date(d);
+
+  while (remaining > 0) {
+    cur = new Date(cur.getTime() + 60 * 60 * 1000); // +1 hora
+    if (this.isBusinessDay(cur, holidays)) remaining--;
   }
 
-  private nowString(): string {
-    return new Date().toLocaleString('es-AR', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  }
+  return cur;
+}
+
+
+private nowString(): string {
+  return new Date().toLocaleString('es-AR', {
+    timeZone: 'America/Argentina/Buenos_Aires',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
 
   async findAll() {
     const list = await this.reservationsRepo.find({

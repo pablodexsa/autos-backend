@@ -14,6 +14,9 @@ import { seedAdmin } from './seed/seed-admin';
 
 
 async function bootstrap() {
+  
+  process.env.TZ = 'America/Argentina/Buenos_Aires';
+
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   // Base

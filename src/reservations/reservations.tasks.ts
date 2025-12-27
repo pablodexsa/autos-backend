@@ -8,15 +8,18 @@ export class ReservationsTasks {
 
   constructor(private readonly reservationsService: ReservationsService) {}
 
-  private nowString(): string {
-    return new Date().toLocaleString('es-AR', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  }
+private nowString(): string {
+  return new Date().toLocaleString('es-AR', {
+    timeZone: 'America/Argentina/Buenos_Aires',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
 
   // 🕒 Cada hora: marca reservas vencidas
 @Cron(CronExpression.EVERY_HOUR, { timeZone: 'America/Argentina/Buenos_Aires' })
