@@ -43,10 +43,23 @@ export class ReservationsService {
 
 private readonly AR_TZ = 'America/Argentina/Buenos_Aires';
 
+private formatDateTimeAR(d: Date): string {
+  return d.toLocaleString('es-AR', {
+    timeZone: 'America/Argentina/Buenos_Aires',
+    hour12: false, // <- fuerza 24 horas
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+
 /**
  * Feriados configurables.
  * - AR_HOLIDAYS puede incluir fechas YYYY-MM-DD separadas por coma.
- *   Ej: "2025-01-01,2025-03-24,2025-12-25"
+ *   Ej: "2025-01-01,2025-03-24,2025-12-25". Esta en el .env
  */
 private getHolidaySet(): Set<string> {
   const raw = (process.env.AR_HOLIDAYS ?? '').trim();
@@ -412,7 +425,8 @@ private nowString(): string {
     doc.text(`Estado: ${res.status}`);
     doc.text(`Importe de Reserva: ${pesos(Number(res.amount))}`);
     doc.text(`Fecha: ${new Date(res.date).toLocaleDateString('es-AR')}`);
-    doc.text(`Vigencia hasta: ${new Date(res.expiryDate).toLocaleString('es-AR')}`);
+    doc.text(`Vigencia hasta: ${this.formatDateTimeAR(new Date(res.expiryDate))}`);
+
 
     sectionTitle('Cliente');
     doc.text(`${res.client.firstName} ${res.client.lastName}`);
@@ -439,9 +453,7 @@ private nowString(): string {
       .fontSize(9)
       .fillColor('#555')
       .text(
-        `Esta reserva tendrá vigencia hasta ${new Date(res.expiryDate).toLocaleString(
-          'es-AR',
-        )}. En caso de no integrarse el saldo o no presentar la documentación de garantes, quedará sin efecto.`,
+        `Esta reserva tendrá vigencia hasta ${this.formatDateTimeAR(new Date(res.expiryDate))}. En caso de no integrarse el saldo o no presentar la documentación de garantes, quedará sin efecto.`,
         { align: 'justify' },
       );
 
