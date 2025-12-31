@@ -26,18 +26,43 @@ export class InstallmentsService {
 
     const installments = await this.installmentsRepository.find({
       where,
-      relations: [
-        'sale',
-        'sale.client',
-        'payments',
-        'client',
-      ],
-      order: { dueDate: 'ASC' },
+relations: [
+  'sale',
+  'sale.client',
+  'sale.installments',   // ✅ necesario para total y posición
+  'payments',
+  'client',
+],
+order: { dueDate: 'ASC' },
     });
+
+// ✅ Precalcular "número/total" por venta (para no recalcular en cada fila)
+const labelByInstallmentId = new Map<number, string>();
+
+const bySale = new Map<number, any[]>();
+for (const inst of installments as any[]) {
+  const sid = inst.sale?.id;
+  if (!sid) continue;
+  if (!bySale.has(sid)) bySale.set(sid, []);
+  bySale.get(sid)!.push(inst);
+}
+
+for (const [saleId, list] of bySale.entries()) {
+  // Orden real por vencimiento
+  const ordered = [...list].sort(
+    (a: any, b: any) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime(),
+  );
+  const total = ordered.length;
+
+  ordered.forEach((inst: any, idx: number) => {
+    labelByInstallmentId.set(inst.id, `${idx + 1}/${total}`);
+  });
+}
 
     // Normalizamos la respuesta para el frontend
     return installments.map((inst: any) => ({
       id: inst.id,
+      installmentLabel: labelByInstallmentId.get(inst.id) ?? null,
       amount: inst.amount,
       paid: inst.paid === true,
       dueDate: inst.dueDate,
