@@ -116,7 +116,11 @@ export class InstallmentPaymentController {
 
     // 👤 Cliente
     section('Cliente');
-    const client = payment.client || payment.installment?.sale?.client;
+const client =
+  payment.client ||
+  payment.installment?.client ||
+  payment.installment?.sale?.client;
+
     if (client) {
 const fullName =
   [client.firstName, client.lastName].filter(Boolean).join(' ') || '-';

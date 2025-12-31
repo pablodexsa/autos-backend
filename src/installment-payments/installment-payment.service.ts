@@ -1,9 +1,8 @@
 ﻿import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { InstallmentPayment } from './installment-payment.entity';
 import { Installment } from '../installments/installment.entity';
-import { Client } from '../clients/entities/client.entity';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -14,24 +13,83 @@ export class InstallmentPaymentService {
     private readonly paymentRepo: Repository<InstallmentPayment>,
     @InjectRepository(Installment)
     private readonly installmentRepo: Repository<Installment>,
-    @InjectRepository(Client)
-    private readonly clientRepo: Repository<Client>,
   ) {}
 
-  // 📋 Listar todos los pagos
+  // 📋 Listar todos los pagos (ENTIDADES + relations)
+  // 📋 Listar todos los pagos (ENTIDADES + relations) + label de cuota (1/12)
   async findAll() {
-    return this.paymentRepo.find({
-      relations: ['installment', 'installment.sale', 'client'],
+    const rows = await this.paymentRepo.find({
+      relations: [
+        'client',
+        'installment',
+        'installment.client',
+        'installment.sale',
+        'installment.sale.client',
+      ],
       order: { createdAt: 'DESC' },
+    });
+
+    // Tomamos los saleIds presentes en los pagos (para calcular N/Total por venta)
+    const saleIds = Array.from(
+      new Set(
+        rows
+          .map((p: any) => p.installment?.sale?.id)
+          .filter((id: any) => !!id),
+      ),
+    );
+
+    // Traemos TODAS las cuotas de esas ventas, ordenadas por dueDate
+    const allInstallments = saleIds.length
+      ? await this.installmentRepo.find({
+          where: { sale: { id: In(saleIds) } } as any,
+          relations: ['sale'],
+          order: { dueDate: 'ASC', id: 'ASC' } as any,
+        })
+      : [];
+
+    // Map: saleId -> [installmentIds ordenados]
+    const saleToInstallmentIds = new Map<number, number[]>();
+    for (const inst of allInstallments as any[]) {
+      const sid = inst.sale?.id;
+      if (!sid) continue;
+      if (!saleToInstallmentIds.has(sid)) saleToInstallmentIds.set(sid, []);
+      saleToInstallmentIds.get(sid)!.push(inst.id);
+    }
+
+    // Devolvemos el mismo objeto de siempre + installmentLabel
+    return rows.map((p: any) => {
+      const saleId = p.installment?.sale?.id ?? null;
+      const instId = p.installment?.id ?? p.installmentId ?? null;
+
+      let installmentLabel: string | null = null;
+
+      if (saleId && instId && saleToInstallmentIds.has(saleId)) {
+        const ids = saleToInstallmentIds.get(saleId)!;
+        const total = ids.length;
+        const idx = ids.indexOf(instId);
+        if (idx >= 0) installmentLabel = `${idx + 1}/${total}`;
+      }
+
+      return {
+        ...p,
+        installmentLabel, // ✅ nuevo campo
+      };
     });
   }
 
-  // 🔍 Buscar un pago
+  // 🔍 Buscar un pago (ENTIDAD + relations)
   async findOne(id: number) {
     const payment = await this.paymentRepo.findOne({
       where: { id },
-      relations: ['installment', 'installment.sale', 'client'],
+      relations: [
+        'client',
+        'installment',
+        'installment.client',
+        'installment.sale',
+        'installment.sale.client',
+      ],
     });
+
     if (!payment) throw new NotFoundException('Pago no encontrado');
     return payment;
   }
@@ -45,49 +103,50 @@ export class InstallmentPaymentService {
   }) {
     const installment = await this.installmentRepo.findOne({
       where: { id: data.installmentId },
-      relations: ['sale', 'sale.client'],
+      relations: ['client', 'sale', 'sale.client'],
     });
 
     if (!installment) throw new NotFoundException('Cuota no encontrada');
 
-    const client = installment.sale?.client
-      ? await this.clientRepo.findOne({ where: { id: installment.sale.client.id } })
-      : null;
+    const client = installment.client ?? installment.sale?.client ?? null;
+    if (!client?.id) {
+      throw new NotFoundException('Cliente no encontrado para esta cuota');
+    }
 
-    // 🧾 Guardar archivo si se sube comprobante
     const receiptPath = data.file
       ? `/uploads/receipts/${data.file.filename}`
       : null;
 
-    // 💰 Crear el pago
-const payment = this.paymentRepo.create({
-  installment,
-  client: client ?? undefined, // ✅ TypeORM acepta undefined, no null
-  amount: data.amount,
-  paymentDate: data.paymentDate,
-  receiptPath: receiptPath || undefined,
-  isPaid: true,
-});
+    const payment = this.paymentRepo.create({
+      installment,
+      installmentId: installment.id,
+      client,
+      clientId: client.id,
+      amount: data.amount,
+      paymentDate: data.paymentDate,
+      receiptPath: receiptPath || undefined,
+      isPaid: true,
+    });
 
-
-    // ✅ Actualizar la cuota
+    // ✅ Actualizar cuota
     installment.paid = true;
     installment.status = 'PAID';
     await this.installmentRepo.save(installment);
 
-    // 💾 Guardar el pago
-    return await this.paymentRepo.save(payment);
+    // ✅ Guardar pago
+    const saved = await this.paymentRepo.save(payment);
+
+    // 🔁 Releer para que vuelva con relations (client, installment, sale, etc.)
+    return this.findOne(saved.id);
   }
 
   // ❌ Eliminar un pago
   async remove(id: number) {
-    const payment = await this.findOne(id);
+    const payment = await this.findOne(id); // entidad
 
     if (payment.receiptPath) {
       const filePath = path.join(__dirname, '../../', payment.receiptPath);
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-      }
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     }
 
     // 🔄 revertir estado de cuota si corresponde

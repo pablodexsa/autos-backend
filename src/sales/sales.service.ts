@@ -59,63 +59,85 @@ export class SalesService {
 
   // 🧾 Crear nueva venta
   async create(dto: CreateSaleDto) {
-    const vehicle = await this.vehicleRepo.findOne({ where: { id: dto.vehicleId } });
-    if (!vehicle) throw new NotFoundException('Vehicle not found');
+const vehicle = await this.vehicleRepo.findOne({ where: { id: dto.vehicleId } });
+if (!vehicle) throw new NotFoundException('Vehicle not found');
 
-    const client = await this.clientRepo.findOne({ where: { dni: dto.clientDni } });
+const client = await this.clientRepo.findOne({ where: { dni: dto.clientDni } });
 
-    const sale = this.salesRepo.create({
-      ...dto,
-      client: client ?? undefined,
-      paymentComposition: {
-        hasAdvance: (dto.downPayment ?? 0) > 0,
-        hasPrendario: (dto.prendarioAmount ?? 0) > 0 && (dto.prendarioInstallments ?? 0) > 0,
-        hasPersonal: (dto.personalAmount ?? 0) > 0 && (dto.personalInstallments ?? 0) > 0,
-        hasFinancing: (dto.inHouseAmount ?? 0) > 0 && (dto.inHouseInstallments ?? 0) > 0,
-      },
-    });
+// ✅ VALIDACIÓN A AGREGAR ACÁ
+
+
+const inHouseAmount = Number(dto.inHouseAmount ?? 0);
+
+
+const inHouseInstallments = Number(dto.inHouseInstallments ?? 0);
+
+if (inHouseAmount > 0 && inHouseInstallments > 0 && !client) {
+  throw new NotFoundException('Client not found');
+}
+// 🔚 FIN VALIDACIÓN
+
+const sale = this.salesRepo.create({
+  ...dto,
+  client: client ?? undefined,
+  paymentComposition: {
+    hasAdvance: (dto.downPayment ?? 0) > 0,
+    hasPrendario: (dto.prendarioAmount ?? 0) > 0 && (dto.prendarioInstallments ?? 0) > 0,
+    hasPersonal: (dto.personalAmount ?? 0) > 0 && (dto.personalInstallments ?? 0) > 0,
+    hasFinancing: (dto.inHouseAmount ?? 0) > 0 && (dto.inHouseInstallments ?? 0) > 0,
+  },
+});
 
     const saved = await this.salesRepo.save(sale);
     vehicle.status = 'Sold';
     await this.vehicleRepo.save(vehicle);
 
-    // 💳 Generar plan de pagos (financiación interna)
-    const inHouseAmount = dto.inHouseAmount ?? 0;
-    const inHouseInstallments = dto.inHouseInstallments ?? 0;
-    const inHouseRate = dto.inHouseMonthlyRate ?? 0; // hoy viene 0
+// 💳 Generar plan de pagos (financiación interna)
 
-    if (inHouseAmount > 0 && inHouseInstallments > 0) {
-      // Si la tasa es 0 → monto / cuotas
-      const installmentValue = parseFloat(
-        pmnt(inHouseAmount, inHouseRate, inHouseInstallments).toFixed(2),
-      );
+// 1) tasa: si el front manda 0, buscamos la del plan en loan_rates
+const planRatePercent =
+  Number(dto.inHouseMonthlyRate ?? 0) ||
+  (await this.getRate('financiacion', inHouseInstallments)); // devuelve % (ej: 115)
 
-      const baseDate = yyyymmToDate(dto.initialPaymentMonth, dto.paymentDay);
+// 2) monto total con interés, consistente con el preview del front
+const totalWithInterest =
+  planRatePercent > 0
+    ? inHouseAmount * (1 + planRatePercent / 100)
+    : inHouseAmount;
 
-      for (let i = 0; i < inHouseInstallments; i++) {
-        const due = new Date(
-          baseDate.getFullYear(),
-          baseDate.getMonth() + i,
-          dto.paymentDay,
-          12,
-          0,
-          0,
-        );
+// 3) valor de cuota: total con interés / cantidad de cuotas
+const installmentValue = parseFloat(
+  (totalWithInterest / inHouseInstallments).toFixed(2),
+);
 
-        const inst = this.instRepo.create({
-          sale: saved,                               // Relación CORRECTA
-          saleId: saved.id,
-          client: client ?? null,                    // Cliente asociado
-          concept: 'PERSONAL_FINANCING',             // Mantengo tu concepto
-          amount: installmentValue,
-          dueDate: due,
-          paid: false,
-          status: 'PENDING',
-        } as Partial<Installment>);
+if (inHouseAmount > 0 && inHouseInstallments > 0) {
+  const baseDate = yyyymmToDate(dto.initialPaymentMonth, dto.paymentDay);
 
-        await this.instRepo.save(inst);
-      }
-    }
+  for (let i = 0; i < inHouseInstallments; i++) {
+    const due = new Date(
+      baseDate.getFullYear(),
+      baseDate.getMonth() + i,
+      dto.paymentDay,
+      12,
+      0,
+      0,
+    );
+
+    const inst = this.instRepo.create({
+      sale: saved,
+      saleId: saved.id,
+      client: client!,              // importante para que quede clientId
+      concept: 'PERSONAL_FINANCING',
+      amount: installmentValue,
+      dueDate: due,
+      paid: false,
+      status: 'PENDING',
+    } as Partial<Installment>);
+
+    await this.instRepo.save(inst);
+  }
+}
+
 
     return saved;
   }
