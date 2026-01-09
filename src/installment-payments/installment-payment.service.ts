@@ -4,7 +4,7 @@
   StreamableFile,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+  import { Repository } from 'typeorm';
 import { InstallmentPayment } from './installment-payment.entity';
 import { Installment } from '../installments/installment.entity';
 import PdfPrinter from 'pdfmake';
@@ -31,7 +31,6 @@ export class InstallmentPaymentService {
     return saved as InstallmentPayment;
   }
 
-
   // =========================
   // 📄 GENERAR COMPROBANTE PDF
   // =========================
@@ -47,12 +46,19 @@ export class InstallmentPaymentService {
       ],
     });
 
-    if (!payment) throw new NotFoundException('Payment not found');
+    if (!payment) {
+      throw new NotFoundException('Payment not found');
+    }
 
     const inst = payment.installment;
-    if (!inst) throw new NotFoundException('Installment not found');
+    if (!inst) {
+      throw new NotFoundException('Installment not found');
+    }
 
+    // Vehículo (si la venta tiene asociado un vehículo)
     const vehicle = inst.sale?.vehicle ?? null;
+
+    // Cliente: primero la relación directa, luego el cliente de la venta
     const client = inst.client ?? inst.sale?.client ?? null;
 
     // Calcular etiqueta X/Y
@@ -69,10 +75,6 @@ export class InstallmentPaymentService {
     const pDate = payment.paymentDate
       ? new Date(payment.paymentDate).toLocaleDateString('es-AR')
       : '—';
-
-    const iDate = inst.paymentDate
-      ? new Date(inst.paymentDate).toLocaleDateString('es-AR')
-      : pDate;
 
     // Montos
     const original = Number(inst.amount).toLocaleString('es-AR', {
@@ -117,15 +119,17 @@ export class InstallmentPaymentService {
       content: [
         { text: 'COMPROBANTE DE PAGO', style: 'header', margin: [0, 0, 0, 20] },
 
+        // CLIENTE (si existe)
         client && {
           text: [
             { text: 'CLIENTE\n', bold: true },
             `${client.lastName} ${client.firstName}\n`,
-            `DNI: ${client.dni}\n`,
-          ],
+            client.dni ? `DNI: ${client.dni}\n` : '',
+          ].filter(Boolean),
           margin: [0, 0, 0, 15],
         },
 
+        // VEHÍCULO (si existe)
         vehicle && {
           text: [
             { text: 'VEHÍCULO\n', bold: true },
@@ -202,15 +206,26 @@ export class InstallmentPaymentService {
   }
 
   async findAll() {
+    // Ampliamos relaciones para que en la lista de pagos se pueda navegar a cliente/cuota si hace falta
     return this.installmentPaymentsRepository.find({
-      relations: ['installment'],
+      relations: [
+        'installment',
+        'installment.client',
+        'installment.sale',
+        'installment.sale.client',
+      ],
     });
   }
 
   async findOne(id: number) {
     const payment = await this.installmentPaymentsRepository.findOne({
       where: { id },
-      relations: ['installment'],
+      relations: [
+        'installment',
+        'installment.client',
+        'installment.sale',
+        'installment.sale.client',
+      ],
     });
     if (!payment) throw new NotFoundException('InstallmentPayment not found');
     return payment;

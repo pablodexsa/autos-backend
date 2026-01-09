@@ -1,4 +1,8 @@
-﻿import { Injectable, NotFoundException } from '@nestjs/common';
+﻿import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, FindOptionsWhere } from 'typeorm';
 import { Installment } from './installment.entity';
@@ -21,6 +25,7 @@ export class InstallmentsService {
   /**
    * Calcula el monto actual de la cuota aplicando 1% diario
    * sobre el saldo pendiente (remainingAmount) si está vencida.
+   * asOf indica la fecha de referencia para el cálculo (normalmente HOY).
    */
   private getCurrentAmount(inst: Installment, asOf: Date = new Date()): number {
     const baseRaw =
@@ -80,7 +85,7 @@ export class InstallmentsService {
       bySale.get(sid)!.push(inst);
     }
 
-    for (const [saleId, list] of bySale.entries()) {
+    for (const [, list] of bySale.entries()) {
       // Orden real por vencimiento
       const ordered = [...list].sort(
         (a: any, b: any) =>
@@ -91,8 +96,7 @@ export class InstallmentsService {
       ordered.forEach((inst: any, idx: number) => {
         labelByInstallmentId.set(inst.id, `${idx + 1}/${total}`);
 
-        // Si tu entity tiene installmentNumber/totalInstallments y querés
-        // mantenerlos sincronizados, podrías setearlos aquí en memoria:
+        // Sincronizamos campos de numeración si existen en la entity
         inst.installmentNumber = idx + 1;
         inst.totalInstallments = total;
       });
@@ -114,13 +118,23 @@ export class InstallmentsService {
         isOverdue = dToday > due;
       }
 
-      const client =
-        inst.client ??
-        inst.sale?.client ??
-        null;
+      const client = inst.client ?? inst.sale?.client ?? null;
 
-      const payments = inst.payments ?? [];
-      const payment = payments.length > 0 ? payments[payments.length - 1] : null;
+      // ✅ Ordenar pagos por fecha (y como respaldo por id) y tomar el último
+      const paymentsArr = Array.isArray(inst.payments)
+        ? [...inst.payments]
+        : [];
+      paymentsArr.sort((a: any, b: any) => {
+        const da = a.paymentDate ? new Date(a.paymentDate).getTime() : 0;
+        const db = b.paymentDate ? new Date(b.paymentDate).getTime() : 0;
+
+        if (da !== db) return da - db;
+        return (a.id ?? 0) - (b.id ?? 0);
+      });
+      const payment =
+        paymentsArr.length > 0
+          ? paymentsArr[paymentsArr.length - 1]
+          : null;
 
       return {
         id: inst.id,
@@ -146,7 +160,7 @@ export class InstallmentsService {
             }
           : null,
 
-        payment, // último pago (si existe)
+        payment, // 👉 ahora realmente el último pago registrado
 
         concept: inst.concept,
         receiver: inst.receiver,
@@ -170,6 +184,7 @@ export class InstallmentsService {
    * - Si el monto cancela la cuota, se marca como PAID y remainingAmount = 0.
    * - Si es parcial, se deja remainingAmount con el saldo y status = PARTIALLY_PAID.
    * - Observaciones se acumulan, no se pisan.
+   * - Se contempla 1 % diario, usando la MISMA fecha de referencia que la grilla (hoy).
    */
   async applyPaymentToInstallment(
     id: number,
@@ -186,14 +201,59 @@ export class InstallmentsService {
       throw new NotFoundException(`Installment ${id} not found`);
     }
 
-    // Inicializamos remainingAmount si aún no se había seteado
-    if (inst.remainingAmount == null) {
-      inst.remainingAmount = inst.amount;
+    const payAmount = Number(amount);
+    if (!payAmount || payAmount <= 0) {
+      throw new BadRequestException('El monto del pago debe ser mayor a 0.');
     }
 
-    const payAmount = Number(amount);
-    const prevRemaining = Number(inst.remainingAmount);
-    const newRemaining = +(prevRemaining - payAmount).toFixed(2);
+    // Principal base (sin interés) antes del pago
+    let basePrincipal =
+      inst.remainingAmount != null
+        ? Number(inst.remainingAmount)
+        : Number(inst.amount);
+
+    if (basePrincipal <= 0) {
+      throw new BadRequestException(
+        'La cuota no tiene saldo pendiente para pagar.',
+      );
+    }
+
+    // Fecha de referencia para el interés: HOY (igual que la grilla)
+    const todayForInterest = new Date();
+
+    // Cálculo de días de mora respecto a hoy
+    const due = inst.dueDate ? new Date(inst.dueDate) : null;
+    let daysLate = 0;
+    if (due) {
+      const d0 = new Date(todayForInterest);
+      const dDue = new Date(due);
+      d0.setHours(0, 0, 0, 0);
+      dDue.setHours(0, 0, 0, 0);
+
+      if (d0 > dDue) {
+        const diffMs = d0.getTime() - dDue.getTime();
+        daysLate = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+      }
+    }
+
+    // Factor de interés según días de mora (respecto de hoy)
+    const factor = 1 + 0.01 * daysLate;
+
+    // Monto actual adeudado a la fecha de referencia (hoy)
+    const currentAmount = +(
+      factor > 1 ? basePrincipal * factor : basePrincipal
+    ).toFixed(2);
+
+    // No permitir pagar más de lo que vale hoy la cuota
+    if (payAmount > currentAmount + 0.01) {
+      throw new BadRequestException(
+        `El monto a pagar ($${payAmount.toFixed(
+          2,
+        )}) no puede superar el valor actual de la cuota ($${currentAmount.toFixed(
+          2,
+        )}).`,
+      );
+    }
 
     // Observaciones: concatenar al final si viene algo nuevo
     if (observations && observations.trim().length > 0) {
@@ -201,18 +261,32 @@ export class InstallmentsService {
       inst.observations = prefix + observations.trim();
     }
 
+    // Guardamos la fecha "real" de pago para trazabilidad y recibo
+    const effectiveDate = paymentDate ? new Date(paymentDate) : new Date();
     inst.receiver = receiver;
-    inst.lastPaymentAt = new Date(paymentDate);
+    inst.lastPaymentAt = effectiveDate;
 
-    if (newRemaining <= 0.01) {
+    if (payAmount >= currentAmount - 0.01) {
       // Consideramos la cuota saldada
       inst.remainingAmount = 0;
       inst.paid = true;
       inst.status = 'PAID';
-      inst.paymentDate = new Date(paymentDate);
+      inst.paymentDate = effectiveDate;
     } else {
-      // Pago parcial
-      inst.remainingAmount = newRemaining;
+      /**
+       * Pago parcial:
+       * Queremos que:
+       *   current_after(hoy) = current_before(hoy) - pago
+       *
+       * current_before(hoy) = P * factor
+       * current_after(hoy)  = P' * factor
+       * => P' * factor = P * factor - pago
+       * => P' = P - pago / factor
+       */
+      const divisor = factor > 0 ? factor : 1;
+      const newPrincipal = basePrincipal - payAmount / divisor;
+
+      inst.remainingAmount = +Math.max(newPrincipal, 0).toFixed(2);
       inst.paid = false;
       inst.status = 'PARTIALLY_PAID';
       inst.paymentDate = null;
