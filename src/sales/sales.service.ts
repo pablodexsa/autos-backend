@@ -126,20 +126,35 @@ if (inHouseAmount > 0 && inHouseInstallments > 0) {
     const inst = this.instRepo.create({
       sale: saved,
       saleId: saved.id,
-      client: client!,              // importante para que quede clientId
+
+      client: client!, // importante para que quede clientId
+      clientId: client!.id,
+
       concept: 'PERSONAL_FINANCING',
+
+      // Monto original de la cuota
       amount: installmentValue,
+
+      // ✅ Saldo pendiente inicial = monto original
+      remainingAmount: installmentValue,
+
       dueDate: due,
+
+      // ✅ Estado inicial
       paid: false,
       status: 'PENDING',
+
+      // ✅ Datos de posición dentro del plan
+      installmentNumber: i + 1,
+      totalInstallments: inHouseInstallments,
     } as Partial<Installment>);
 
     await this.instRepo.save(inst);
   }
 }
 
+return saved;
 
-    return saved;
   }
 
   // 📋 Listar todas las ventas
