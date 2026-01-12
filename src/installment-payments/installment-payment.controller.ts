@@ -13,7 +13,7 @@
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
-import type { Response } from 'express';
+import type { Express, Response } from 'express';
 import * as path from 'path';
 import * as fs from 'fs';
 import PDFDocument from 'pdfkit';
