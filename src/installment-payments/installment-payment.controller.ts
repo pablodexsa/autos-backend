@@ -9,6 +9,7 @@
   Res,
   ParseIntPipe,
   Delete,
+  NotFoundException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
@@ -47,23 +48,28 @@ export class InstallmentPaymentController {
       }),
     }),
   )
-  async create(@Body() body: any, @UploadedFile() file?: any) {
-    const dto = {
+  async create(@Body() body: any, @UploadedFile() file?: Express.Multer.File) {
+    const dto: any = {
       installmentId: Number(body.installmentId),
       amount: Number(body.amount),
       paymentDate: body.paymentDate,
-      file,
     };
+
+    // ✅ Guardamos ruta del comprobante adjunto (si se sube archivo)
+    if (file && file.filename) {
+      dto.receiptPath = `uploads/receipts/${file.filename}`;
+    }
+
     return this.paymentService.create(dto);
   }
 
-  // ❌ Eliminar pago
+  // ❌ Eliminar pago (aunque no lo uses en el front, lo dejamos)
   @Delete(':id')
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.paymentService.remove(id);
   }
 
-  // 🖨️ Generar y descargar comprobante PDF
+  // 🖨️ Generar y descargar comprobante PDF del sistema
   @Get(':id/receipt')
   async generateReceipt(
     @Param('id', ParseIntPipe) id: number,
@@ -78,7 +84,7 @@ export class InstallmentPaymentController {
       doc.on('end', () => resolve(Buffer.concat(chunks))),
     );
 
-    // 👉 Helper para formatear fecha sin problemas de zona horaria
+    // 👉 Helper para fecha sin problemas de timezone
     const formatDate = (value: any): string => {
       if (!value) return '-';
       const iso = new Date(value).toISOString().slice(0, 10); // YYYY-MM-DD
@@ -91,9 +97,9 @@ export class InstallmentPaymentController {
         ? `$ ${n.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`
         : '-';
 
-    // 📄 Marca de agua (logo con baja opacidad)
+    // 📄 Marca de agua (logo)
     try {
-      const logoPath = path.join(__dirname, '../../public/Logobyn.JPG');
+      const logoPath = path.join(__dirname, '../../logos/Logobyn.JPG');
       if (fs.existsSync(logoPath)) {
         doc.opacity(0.07).image(logoPath, 100, 150, {
           fit: [400, 400],
@@ -141,7 +147,6 @@ export class InstallmentPaymentController {
 
     // 👤 Cliente
     section('Cliente');
-
     const client =
       (payment as any).client ||
       payment.installment?.client ||
@@ -159,28 +164,40 @@ export class InstallmentPaymentController {
     // 💳 Cuota asociada
     section('Cuota');
     if (payment.installment) {
-      const inst = payment.installment;
+      const inst: any = payment.installment;
 
-      // Etiqueta de cuota X/Y
-      const cuotaLabel =
-        inst.installmentNumber && inst.totalInstallments
-          ? `${inst.installmentNumber}/${inst.totalInstallments}`
-          : `#${inst.id}`;
+      // 🧮 Etiqueta cuota X/Y
+      let cuotaLabel: string;
+
+      if (inst.installmentNumber && inst.totalInstallments) {
+        cuotaLabel = `${inst.installmentNumber}/${inst.totalInstallments}`;
+      } else if (inst.sale?.installments?.length) {
+        const ordered = [...inst.sale.installments].sort(
+          (a: any, b: any) =>
+            new Date(a.dueDate).getTime() -
+            new Date(b.dueDate).getTime(),
+        );
+        const idx = ordered.findIndex((x: any) => x.id === inst.id);
+        cuotaLabel =
+          idx >= 0 ? `${idx + 1}/${ordered.length}` : `#${inst.id}`;
+      } else {
+        cuotaLabel = `#${inst.id}`;
+      }
 
       doc.text(`Cuota: ${cuotaLabel}`);
       doc.text(`Vencimiento: ${formatDate(inst.dueDate)}`);
       doc.text(`Monto original: ${pesos(Number(inst.amount))}`);
 
-      // Cálculo de interés y saldos para mostrar valores coherentes con la grilla
+      // 💰 Cálculo de interés / saldos coherente con la grilla
       let saldoActual: number | null = null;
       let montoActualAntesPago: number | null = null;
 
-      const baseRemaining =
+      const basePrincipal =
         inst.remainingAmount != null
           ? Number(inst.remainingAmount)
           : Number(inst.amount);
 
-      // Igual que en el service: usamos HOY para el interés
+      // Igual que en el service de cuotas: usamos HOY para interés
       const todayForInterest = new Date();
       let daysLate = 0;
       if (inst.dueDate) {
@@ -197,23 +214,21 @@ export class InstallmentPaymentController {
 
       const factor = 1 + 0.01 * daysLate;
 
-      // Saldo actualizado a hoy (después de este pago) → debe coincidir con lo que ves en la página
+      // Saldo actualizado a hoy (después de este pago)
       const currentAfter =
-        factor > 1 ? baseRemaining * factor : baseRemaining;
+        factor > 1 ? basePrincipal * factor : basePrincipal;
       saldoActual = +currentAfter.toFixed(2);
 
-      // Monto de la cuota al día de pago (antes de este pago)
+      // Monto de la cuota al día de pago (antes del pago)
       const payAmountNum = Number(payment.amount) || 0;
       const currentBefore = currentAfter + payAmountNum;
       montoActualAntesPago = +currentBefore.toFixed(2);
 
-      if (montoActualAntesPago != null) {
-        doc.text(
-          `Monto de la cuota al día de pago (antes del pago): ${pesos(
-            montoActualAntesPago,
-          )}`,
-        );
-      }
+      doc.text(
+        `Monto de la cuota al día de pago (antes del pago): ${pesos(
+          montoActualAntesPago,
+        )}`,
+      );
 
       if (saldoActual != null && saldoActual > 0.009) {
         doc.text(
@@ -221,6 +236,22 @@ export class InstallmentPaymentController {
         );
       } else {
         doc.text('Saldo pendiente actualizado: $ 0,00');
+      }
+
+      // Recibe / observaciones (guardadas en la cuota)
+      if (inst.receiver) {
+        const recibeText =
+          inst.receiver === 'AGENCY'
+            ? 'Agencia'
+            : inst.receiver === 'STUDIO'
+            ? 'Estudio'
+            : inst.receiver;
+        doc.text(`Recibe: ${recibeText}`);
+      }
+
+      if (inst.observations) {
+        doc.moveDown(0.5);
+        doc.text(`Observaciones: ${inst.observations}`);
       }
     }
 
@@ -243,5 +274,26 @@ export class InstallmentPaymentController {
       `inline; filename="recibo_pago_${id}.pdf"`,
     );
     return res.send(buffer);
+  }
+
+  // 📎 Descargar adjunto original (archivo subido)
+  @Get(':id/attachment')
+  async getAttachment(
+    @Param('id', ParseIntPipe) id: number,
+    @Res() res: Response,
+  ) {
+    const payment = await this.paymentService.findOne(id);
+
+    if (!payment.receiptPath) {
+      throw new NotFoundException('No hay archivo adjunto para este pago.');
+    }
+
+    const filePath = path.join(process.cwd(), payment.receiptPath);
+
+    if (!fs.existsSync(filePath)) {
+      throw new NotFoundException('Archivo adjunto no encontrado en el servidor.');
+    }
+
+    return res.sendFile(filePath);
   }
 }

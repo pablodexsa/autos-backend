@@ -4,7 +4,7 @@
   StreamableFile,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-  import { Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { InstallmentPayment } from './installment-payment.entity';
 import { Installment } from '../installments/installment.entity';
 import PdfPrinter from 'pdfmake';
@@ -32,7 +32,7 @@ export class InstallmentPaymentService {
   }
 
   // =========================
-  // 📄 GENERAR COMPROBANTE PDF
+  // 📄 GENERAR COMPROBANTE PDF (VERSIÓN pdfmake, SI LA USÁS)
   // =========================
   async getReceipt(paymentId: number): Promise<StreamableFile> {
     const payment = await this.installmentPaymentsRepository.findOne({
@@ -206,14 +206,17 @@ export class InstallmentPaymentService {
   }
 
   async findAll() {
-    // Ampliamos relaciones para que en la lista de pagos se pueda navegar a cliente/cuota si hace falta
+    // Ampliamos relaciones para que en la lista de pagos se pueda navegar a cliente/cuota
+    // y, si hace falta, calcular X/Y utilizando sale.installments
     return this.installmentPaymentsRepository.find({
       relations: [
         'installment',
         'installment.client',
         'installment.sale',
         'installment.sale.client',
+        'installment.sale.installments',
       ],
+      order: { id: 'ASC' },
     });
   }
 
@@ -225,6 +228,7 @@ export class InstallmentPaymentService {
         'installment.client',
         'installment.sale',
         'installment.sale.client',
+        'installment.sale.installments',
       ],
     });
     if (!payment) throw new NotFoundException('InstallmentPayment not found');
