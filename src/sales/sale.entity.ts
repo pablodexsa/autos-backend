@@ -57,6 +57,9 @@ clientName: string;
   @Column('decimal', { precision: 12, scale: 2, default: 0 })
   tradeInValue: number;
 
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  tradeInPlate?: string | null;
+
   @Column('decimal', { precision: 12, scale: 2, default: 0 })
   downPayment: number; // Anticipo
 

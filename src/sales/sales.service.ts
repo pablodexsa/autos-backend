@@ -59,102 +59,109 @@ export class SalesService {
 
   // 🧾 Crear nueva venta
   async create(dto: CreateSaleDto) {
-const vehicle = await this.vehicleRepo.findOne({ where: { id: dto.vehicleId } });
-if (!vehicle) throw new NotFoundException('Vehicle not found');
+    const vehicle = await this.vehicleRepo.findOne({ where: { id: dto.vehicleId } });
+    if (!vehicle) throw new NotFoundException('Vehicle not found');
 
-const client = await this.clientRepo.findOne({ where: { dni: dto.clientDni } });
+    const client = await this.clientRepo.findOne({ where: { dni: dto.clientDni } });
 
-// ✅ VALIDACIÓN A AGREGAR ACÁ
+    // ✅ VALIDACIÓN A AGREGAR ACÁ
+    const inHouseAmount = Number(dto.inHouseAmount ?? 0);
+    const inHouseInstallments = Number(dto.inHouseInstallments ?? 0);
 
+    if (inHouseAmount > 0 && inHouseInstallments > 0 && !client) {
+      throw new NotFoundException('Client not found');
+    }
+    // 🔚 FIN VALIDACIÓN
 
-const inHouseAmount = Number(dto.inHouseAmount ?? 0);
+    const sale = this.salesRepo.create({
+      ...dto,
+      client: client ?? undefined,
 
+      // 👇 mapeamos explícitamente los campos de permuta
+      hasTradeIn: dto.hasTradeIn,
+      tradeInValue: dto.tradeInValue,
+      tradeInPlate: dto.tradeInPlate ?? null,
 
-const inHouseInstallments = Number(dto.inHouseInstallments ?? 0);
-
-if (inHouseAmount > 0 && inHouseInstallments > 0 && !client) {
-  throw new NotFoundException('Client not found');
-}
-// 🔚 FIN VALIDACIÓN
-
-const sale = this.salesRepo.create({
-  ...dto,
-  client: client ?? undefined,
-  paymentComposition: {
-    hasAdvance: (dto.downPayment ?? 0) > 0,
-    hasPrendario: (dto.prendarioAmount ?? 0) > 0 && (dto.prendarioInstallments ?? 0) > 0,
-    hasPersonal: (dto.personalAmount ?? 0) > 0 && (dto.personalInstallments ?? 0) > 0,
-    hasFinancing: (dto.inHouseAmount ?? 0) > 0 && (dto.inHouseInstallments ?? 0) > 0,
-  },
-});
+      paymentComposition: {
+        hasAdvance: (dto.downPayment ?? 0) > 0,
+        hasPrendario:
+          (dto.prendarioAmount ?? 0) > 0 &&
+          (dto.prendarioInstallments ?? 0) > 0,
+        hasPersonal:
+          (dto.personalAmount ?? 0) > 0 &&
+          (dto.personalInstallments ?? 0) > 0,
+        hasFinancing:
+          (dto.inHouseAmount ?? 0) > 0 &&
+          (dto.inHouseInstallments ?? 0) > 0,
+      },
+    });
 
     const saved = await this.salesRepo.save(sale);
     vehicle.status = 'Sold';
     await this.vehicleRepo.save(vehicle);
 
-// 💳 Generar plan de pagos (financiación interna)
+    // 💳 Generar plan de pagos (financiación interna)
 
-// 1) tasa: si el front manda 0, buscamos la del plan en loan_rates
-const planRatePercent =
-  Number(dto.inHouseMonthlyRate ?? 0) ||
-  (await this.getRate('financiacion', inHouseInstallments)); // devuelve % (ej: 115)
+    // 1) tasa: si el front manda 0, buscamos la del plan en loan_rates
+    const planRatePercent =
+      Number(dto.inHouseMonthlyRate ?? 0) ||
+      (await this.getRate('financiacion', inHouseInstallments)); // devuelve % (ej: 115)
 
-// 2) monto total con interés, consistente con el preview del front
-const totalWithInterest =
-  planRatePercent > 0
-    ? inHouseAmount * (1 + planRatePercent / 100)
-    : inHouseAmount;
+    // 2) monto total con interés, consistente con el preview del front
+    const totalWithInterest =
+      planRatePercent > 0
+        ? inHouseAmount * (1 + planRatePercent / 100)
+        : inHouseAmount;
 
-// 3) valor de cuota: total con interés / cantidad de cuotas
-const installmentValue = parseFloat(
-  (totalWithInterest / inHouseInstallments).toFixed(2),
-);
-
-if (inHouseAmount > 0 && inHouseInstallments > 0) {
-  const baseDate = yyyymmToDate(dto.initialPaymentMonth, dto.paymentDay);
-
-  for (let i = 0; i < inHouseInstallments; i++) {
-    const due = new Date(
-      baseDate.getFullYear(),
-      baseDate.getMonth() + i,
-      dto.paymentDay,
-      12,
-      0,
-      0,
+    // 3) valor de cuota: total con interés / cantidad de cuotas
+    const installmentValue = parseFloat(
+      (totalWithInterest / inHouseInstallments).toFixed(2),
     );
 
-    const inst = this.instRepo.create({
-      sale: saved,
-      saleId: saved.id,
+    if (inHouseAmount > 0 && inHouseInstallments > 0) {
+      const baseDate = yyyymmToDate(dto.initialPaymentMonth, dto.paymentDay);
 
-      client: client!, // importante para que quede clientId
-      clientId: client!.id,
+      for (let i = 0; i < inHouseInstallments; i++) {
+        const due = new Date(
+          baseDate.getFullYear(),
+          baseDate.getMonth() + i,
+          dto.paymentDay,
+          12,
+          0,
+          0,
+        );
 
-      concept: 'PERSONAL_FINANCING',
+        const inst = this.instRepo.create({
+          sale: saved,
+          saleId: saved.id,
 
-      // Monto original de la cuota
-      amount: installmentValue,
+          client: client!, // importante para que quede clientId
+          clientId: client!.id,
 
-      // ✅ Saldo pendiente inicial = monto original
-      remainingAmount: installmentValue,
+          concept: 'PERSONAL_FINANCING',
 
-      dueDate: due,
+          // Monto original de la cuota
+          amount: installmentValue,
 
-      // ✅ Estado inicial
-      paid: false,
-      status: 'PENDING',
+          // ✅ Saldo pendiente inicial = monto original
+          remainingAmount: installmentValue,
 
-      // ✅ Datos de posición dentro del plan
-      installmentNumber: i + 1,
-      totalInstallments: inHouseInstallments,
-    } as Partial<Installment>);
+          dueDate: due,
 
-    await this.instRepo.save(inst);
-  }
-}
+          // ✅ Estado inicial
+          paid: false,
+          status: 'PENDING',
 
-return saved;
+          // ✅ Datos de posición dentro del plan
+          installmentNumber: i + 1,
+          totalInstallments: inHouseInstallments,
+        } as Partial<Installment>);
 
+        await this.instRepo.save(inst);
+      }
+    }
+
+    return saved;
   }
 
   // 📋 Listar todas las ventas
@@ -203,7 +210,9 @@ return saved;
     try {
       const logoPath = path.join(__dirname, '../../logos/Logobyn.JPG');
       if (fs.existsSync(logoPath)) {
-        doc.opacity(0.07).image(logoPath, 100, 180, { fit: [400, 400], align: 'center' });
+        doc
+          .opacity(0.07)
+          .image(logoPath, 100, 180, { fit: [400, 400], align: 'center' });
         doc.opacity(1);
       }
     } catch {
@@ -211,12 +220,20 @@ return saved;
     }
 
     // 🏷️ Encabezado
-    doc.fontSize(22).fillColor('#1e1e1e').text('DE GRAZIA AUTOMOTORES', { align: 'center' });
-    doc.fontSize(12).fillColor('#555').text('Comprobante de Venta', { align: 'center' });
+    doc
+      .fontSize(22)
+      .fillColor('#1e1e1e')
+      .text('DE GRAZIA AUTOMOTORES', { align: 'center' });
+    doc
+      .fontSize(12)
+      .fillColor('#555')
+      .text('Comprobante de Venta', { align: 'center' });
     doc
       .fontSize(10)
       .fillColor('#777')
-      .text(`Emitido el ${new Date().toLocaleDateString('es-AR')}`, { align: 'center' });
+      .text(`Emitido el ${new Date().toLocaleDateString('es-AR')}`, {
+        align: 'center',
+      });
     doc.moveDown(1);
     doc.moveTo(50, doc.y).lineTo(550, doc.y).strokeColor('#009879').stroke();
     doc.moveDown(1);
@@ -224,7 +241,10 @@ return saved;
     // Helpers
     const sectionTitle = (t: string) => {
       doc.moveDown(0.6);
-      doc.fontSize(13).fillColor('#009879').text(t.toUpperCase(), { underline: true });
+      doc
+        .fontSize(13)
+        .fillColor('#009879')
+        .text(t.toUpperCase(), { underline: true });
       doc.moveDown(0.3);
       doc.fontSize(11).fillColor('#1e1e1e');
     };
@@ -240,8 +260,12 @@ return saved;
     // 📋 Datos de la venta
     sectionTitle('Datos de la Venta');
     doc.text(`Número: ${sale.id}`);
-    doc.text(`Fecha: ${new Date(sale.createdAt).toLocaleDateString('es-AR')}`);
-    doc.text(`Forma de Pago: ${this.labelPayment(sale.paymentComposition) || '-'}`);
+    doc.text(
+      `Fecha: ${new Date(sale.createdAt).toLocaleDateString('es-AR')}`,
+    );
+    doc.text(
+      `Forma de Pago: ${this.labelPayment(sale.paymentComposition) || '-'}`,
+    );
     if (sale.personalInstallments)
       doc.text(`Cantidad de Cuotas Totales: ${sale.personalInstallments}`);
     doc.text(`Día de Pago: ${sale.paymentDay}`);
@@ -249,11 +273,16 @@ return saved;
 
     // 💸 Montos principales
     sectionTitle('Detalle de Montos');
-    if (sale.downPayment != null) doc.text(`Anticipo: ${formatPesos(sale.downPayment)}`);
-    if (sale.tradeInValue != null) doc.text(`Valor de Permuta: ${formatPesos(sale.tradeInValue)}`);
-    if (sale.basePrice != null) doc.text(`Precio Lista: ${formatPesos(sale.basePrice)}`);
-    if (sale.balance != null) doc.text(`Saldo (vehículo - permuta): ${formatPesos(sale.balance)}`);
-    if (sale.finalPrice != null) doc.text(`Precio Final de Venta: ${formatPesos(sale.finalPrice)}`);
+    if (sale.downPayment != null)
+      doc.text(`Anticipo: ${formatPesos(sale.downPayment)}`);
+    if (sale.tradeInValue != null)
+      doc.text(`Valor de Permuta: ${formatPesos(sale.tradeInValue)}`);
+    if (sale.basePrice != null)
+      doc.text(`Precio Lista: ${formatPesos(sale.basePrice)}`);
+    if (sale.balance != null)
+      doc.text(`Saldo (vehículo - permuta): ${formatPesos(sale.balance)}`);
+    if (sale.finalPrice != null)
+      doc.text(`Precio Final de Venta: ${formatPesos(sale.finalPrice)}`);
 
     // 🧮 Tasas y montos con financiación (similar al preview)
     const nPrendario = sale.prendarioInstallments ?? 0;
@@ -299,7 +328,7 @@ return saved;
         ? totalPrestamosConInteres / nCuotasGlobal
         : 0;
 
-	    // 💰 Detalle de préstamos y financiaciones
+    // 💰 Detalle de préstamos y financiaciones
     const hasLoans =
       !!sale.prendarioAmount || !!sale.personalAmount || !!sale.inHouseAmount;
 
@@ -374,11 +403,17 @@ return saved;
         sale.inHouseInstallments > 0
       ) {
         doc.moveDown(0.8);
-        doc.fontSize(12).fillColor('#009879').text('Detalle de Cuotas Financiación Personal');
+        doc
+          .fontSize(12)
+          .fillColor('#009879')
+          .text('Detalle de Cuotas Financiación Personal');
         doc.fontSize(11).fillColor('#000');
         doc.text(`Cantidad de Cuotas: ${sale.inHouseInstallments}`);
 
-        const baseFin = financiacionConInteres > 0 ? financiacionConInteres : sale.inHouseAmount;
+        const baseFin =
+          financiacionConInteres > 0
+            ? financiacionConInteres
+            : sale.inHouseAmount;
         const valorCuota = baseFin / sale.inHouseInstallments;
 
         doc.text(`Valor de cada cuota: ${formatPesos(valorCuota)}`);
@@ -393,7 +428,11 @@ return saved;
     // 🚗 Vehículo
     if (sale.vehicle) {
       sectionTitle('Vehículo');
-      doc.text(`${sale.vehicle.brand} ${sale.vehicle.model} ${sale.vehicle.versionName || ''}`);
+      doc.text(
+        `${sale.vehicle.brand} ${sale.vehicle.model} ${
+          sale.vehicle.versionName || ''
+        }`,
+      );
       if (sale.vehicle.year) doc.text(`Año: ${sale.vehicle.year}`);
       if (sale.vehicle.color) doc.text(`Color: ${sale.vehicle.color}`);
       if (sale.vehicle.plate) doc.text(`Patente: ${sale.vehicle.plate}`);
@@ -413,21 +452,22 @@ return saved;
 2. La financiación personal, en caso de corresponder, se ajustará al plan seleccionado.
 3. Las condiciones de entrega, plazos y documentación complementaria serán notificadas al cliente.
 `;
-    doc.fontSize(8.5).fillColor('#555').text(legales, { align: 'justify', lineGap: 2.5 });
+    doc
+      .fontSize(8.5)
+      .fillColor('#555')
+      .text(legales, { align: 'justify', lineGap: 2.5 });
 
     doc.end();
     await done;
     const pdfBuffer = Buffer.concat(chunks);
     fs.writeFileSync(filePath, pdfBuffer);
     return pdfBuffer;
-  fs.writeFileSync(filePath, pdfBuffer);
-  return pdfBuffer;
-}
-
+  }
 
   private labelPayment(comp?: any): string {
     if (!comp) return '-';
-    if (comp.hasFinancing) return 'Anticipo + Prendario + Personal + Financiación';
+    if (comp.hasFinancing)
+      return 'Anticipo + Prendario + Personal + Financiación';
     if (comp.hasPersonal) return 'Anticipo + Prendario + Personal';
     if (comp.hasPrendario) return 'Anticipo + Préstamo Prendario';
     return 'Contado';

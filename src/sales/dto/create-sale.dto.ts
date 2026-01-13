@@ -37,6 +37,11 @@ export class CreateSaleDto {
   @IsOptional()
   tradeInValue?: number;
 
+  // 👇 NUEVO
+  @IsOptional()
+  @IsString()
+  tradeInPlate?: string;
+
   @IsNumber()
   @IsOptional()
   downPayment?: number;

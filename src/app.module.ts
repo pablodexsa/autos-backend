@@ -28,6 +28,9 @@ import { InstallmentSettingsModule } from './installment-settings/installment-se
 import { BudgetReportsModule } from './budget-reports/budget-reports.module';
 import { LoanRatesModule } from './loan-rates/loan-rates.module';
 import { AuditModule } from './audit/audit.module';
+import { SettingsModule } from './settings/settings.module';
+import { Setting } from './settings/setting.entity';
+
 
 // 📦 Entidades
 import { User } from './users/user.entity';
@@ -72,6 +75,7 @@ import { Version } from './versions/version.entity';
         Brand,
         Model,
         Version,
+        Setting,
       ],
     }),
 
@@ -99,6 +103,7 @@ import { Version } from './versions/version.entity';
     BudgetReportsModule,
     LoanRatesModule,
     AuditModule,
+    SettingsModule,
   ],
   controllers: [AppController],
   providers: [
