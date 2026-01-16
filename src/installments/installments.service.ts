@@ -68,6 +68,7 @@ export class InstallmentsService {
         'sale',
         'sale.client',
         'sale.installments', // ✅ necesario para total y posición
+        'sale.vehicle',      // ✅ necesario para patente / datos de vehículo
         'payments',
         'client',
       ],
@@ -119,6 +120,7 @@ export class InstallmentsService {
       }
 
       const client = inst.client ?? inst.sale?.client ?? null;
+      const vehicle = inst.sale?.vehicle ?? null;
 
       // ✅ Ordenar pagos por fecha (y como respaldo por id) y tomar el último
       const paymentsArr = Array.isArray(inst.payments)
@@ -160,7 +162,20 @@ export class InstallmentsService {
             }
           : null,
 
-        payment, // 👉 ahora realmente el último pago registrado
+        // 👇 NUEVO: datos del vehículo para poder mostrar patente en el frontend
+        vehicle: vehicle
+          ? {
+              id: vehicle.id,
+              plate: vehicle.plate,
+              brand: vehicle.brand,
+              model: vehicle.model,
+              versionName: vehicle.versionName,
+              year: vehicle.year,
+              color: vehicle.color,
+            }
+          : null,
+
+        payment, // 👉 último pago registrado
 
         concept: inst.concept,
         receiver: inst.receiver,
@@ -173,7 +188,7 @@ export class InstallmentsService {
   async findOne(id: number) {
     const inst = await this.installmentsRepository.findOne({
       where: { id },
-      relations: ['sale', 'sale.client', 'payments', 'client'],
+      relations: ['sale', 'sale.client', 'payments', 'sale.vehicle', 'client'],
     });
     if (!inst) throw new NotFoundException('Installment not found');
     return inst;

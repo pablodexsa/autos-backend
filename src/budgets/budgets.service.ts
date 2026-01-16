@@ -1,11 +1,15 @@
-﻿import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+﻿import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DeepPartial } from 'typeorm';
 import { Budget } from './budget.entity';
 import { Vehicle } from '../vehicles/vehicle.entity';
 import { Client } from '../clients/entities/client.entity';
-import { BudgetReportsService } from '../budget-reports/budget-reports.service';
 import { LoanRate } from '../loan-rates/loan-rate.entity';
+import { BudgetReportsService } from '../budget-reports/budget-reports.service';
 import PDFDocument from 'pdfkit';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -15,43 +19,37 @@ export class BudgetsService {
   constructor(
     @InjectRepository(Budget)
     private readonly budgetsRepository: Repository<Budget>,
+
     @InjectRepository(Vehicle)
     private readonly vehiclesRepository: Repository<Vehicle>,
+
     @InjectRepository(Client)
     private readonly clientsRepository: Repository<Client>,
+
     @InjectRepository(LoanRate)
     private readonly loanRatesRepository: Repository<LoanRate>,
+
+    // 👇 Servicio de reportes inyectado
     private readonly budgetReportsService: BudgetReportsService,
   ) {}
 
-  private pesos(n: number | null | undefined) {
-    if (!n && n !== 0) return '-';
-    return `$ ${n.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`;
-  }
-
-  private nowString(): string {
-    return new Date().toLocaleString('es-AR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  }
-
-  async findAll() {
+  async findAll(): Promise<Budget[]> {
     return this.budgetsRepository.find({
       relations: ['vehicle', 'client'],
       order: { createdAt: 'DESC' },
     });
   }
 
-  async findOne(id: number) {
+  async findOne(id: number): Promise<Budget> {
     const budget = await this.budgetsRepository.findOne({
       where: { id },
       relations: ['vehicle', 'client'],
     });
-    if (!budget) throw new NotFoundException('Presupuesto no encontrado');
+
+    if (!budget) {
+      throw new NotFoundException(`Presupuesto con id ${id} no encontrado`);
+    }
+
     return budget;
   }
 
@@ -66,16 +64,103 @@ export class BudgetsService {
     });
     if (!client) throw new BadRequestException('Cliente no encontrado');
 
-    // 🧮 Buscar tasas según el tipo de préstamo y meses
-    const prendarioRate = await this.loanRatesRepository.findOne({
-      where: { type: 'prendario', months: dto.installments },
-    });
-    const personalRate = await this.loanRatesRepository.findOne({
-      where: { type: 'personal', months: dto.installments },
-    });
-    const financiacionRate = await this.loanRatesRepository.findOne({
-      where: { type: 'financiacion', months: dto.installments },
-    });
+    // 🔄 Normalizar montos provenientes del frontend (soporta nombres antiguos y nuevos)
+    const downPayment =
+      dto.downPayment != null ? Number(dto.downPayment) : 0;
+
+    const hasTradeIn =
+      dto.hasTradeIn === true || dto.hasTradeIn === 'true';
+    const tradeInValue =
+      hasTradeIn && dto.tradeInValue != null ? Number(dto.tradeInValue) : 0;
+
+    // Soporta tanto los campos viejos (prendarioAmount, personalAmount, financiacionAmount)
+    // como los nuevos (montoPrendario, montoPersonal, montoFinanciacion)
+    const prendarioAmount =
+      dto.prendarioAmount != null
+        ? Number(dto.prendarioAmount)
+        : dto.montoPrendario != null
+        ? Number(dto.montoPrendario)
+        : 0;
+
+    const personalAmount =
+      dto.personalAmount != null
+        ? Number(dto.personalAmount)
+        : dto.montoPersonal != null
+        ? Number(dto.montoPersonal)
+        : 0;
+
+    const financiacionAmount =
+      dto.financiacionAmount != null
+        ? Number(dto.financiacionAmount)
+        : dto.montoFinanciacion != null
+        ? Number(dto.montoFinanciacion)
+        : 0;
+
+    // Normalizar nuevamente sobre dto.* para el resto de la lógica
+    dto.prendarioAmount = prendarioAmount || null;
+    dto.personalAmount = personalAmount || null;
+    dto.financiacionAmount = financiacionAmount || null;
+
+    // ✅ Regla de negocio: la suma de anticipo + permuta + financiaciones
+    // debe coincidir con el precio del vehículo
+    const vehiclePrice = Number(vehicle.price) || 0;
+    const totalComposition =
+      downPayment +
+      tradeInValue +
+      prendarioAmount +
+      personalAmount +
+      financiacionAmount;
+
+    const someAmountEntered =
+      downPayment ||
+      tradeInValue ||
+      prendarioAmount ||
+      personalAmount ||
+      financiacionAmount;
+
+    if (someAmountEntered) {
+      const diff = Math.abs(totalComposition - vehiclePrice);
+      if (diff > 1) {
+        throw new BadRequestException(
+          'La suma de anticipo, permuta y financiaciones debe coincidir con el precio del vehículo. Revise los importes.',
+        );
+      }
+    }
+
+    // Cantidad de cuotas solicitadas (1..36)
+    const installmentsCount: number = Number(dto.installments) || 0;
+
+    // Mapeo de tramos para tasas:
+    //  1-12  => usa la tasa configurada para 12 meses
+    // 13-24  => usa la tasa configurada para 24 meses
+    // 25-36  => usa la tasa configurada para 36 meses
+    const bracketMonths =
+      installmentsCount <= 0
+        ? null
+        : installmentsCount <= 12
+        ? 12
+        : installmentsCount <= 24
+        ? 24
+        : installmentsCount <= 36
+        ? 36
+        : null;
+
+    // 🧮 Buscar tasas según el tipo de préstamo y meses del tramo
+    const prendarioRate = bracketMonths
+      ? await this.loanRatesRepository.findOne({
+          where: { type: 'prendario', months: bracketMonths },
+        })
+      : null;
+    const personalRate = bracketMonths
+      ? await this.loanRatesRepository.findOne({
+          where: { type: 'personal', months: bracketMonths },
+        })
+      : null;
+    const financiacionRate = bracketMonths
+      ? await this.loanRatesRepository.findOne({
+          where: { type: 'financiacion', months: bracketMonths },
+        })
+      : null;
 
     console.log('📊 Tasas aplicadas:', {
       prendarioRate: prendarioRate?.rate,
@@ -87,22 +172,22 @@ export class BudgetsService {
     const prendarioConInteres =
       dto.prendarioAmount != null
         ? dto.prendarioAmount * (1 + (prendarioRate?.rate || 0) / 100)
-        : undefined;
+        : 0;
 
     const personalConInteres =
       dto.personalAmount != null
         ? dto.personalAmount * (1 + (personalRate?.rate || 0) / 100)
-        : undefined;
+        : 0;
 
     const financiacionConInteres =
       dto.financiacionAmount != null
         ? dto.financiacionAmount * (1 + (financiacionRate?.rate || 0) / 100)
-        : undefined;
+        : 0;
 
     // 🔹 Calcular total final con intereses
     const finalPrice =
-      (dto.downPayment || 0) +
-      (dto.tradeInValue || 0) +
+      downPayment +
+      tradeInValue +
       (prendarioConInteres || 0) +
       (personalConInteres || 0) +
       (financiacionConInteres || 0);
@@ -113,66 +198,106 @@ export class BudgetsService {
       (personalConInteres || 0) +
       (financiacionConInteres || 0);
 
-    const installments: number = dto.installments || 0;
+    const installments: number = installmentsCount;
     const installmentValue =
-      installments > 0 && totalPrestamos > 0 ? totalPrestamos / installments : undefined;
+      installments > 0 && totalPrestamos > 0
+        ? totalPrestamos / installments
+        : undefined;
 
     // 🧾 Crear el presupuesto correctamente tipado
     const budgetBase: DeepPartial<Budget> = {
       vehicle,
       client,
-      price: dto.price,
+      // siempre tomamos el precio real del vehículo
+      price: vehicle.price,
       status: dto.status ?? 'pending',
       paymentType: dto.paymentType ?? null,
       installments,
       finalPrice,
-      installmentValue, // si no aplica, queda undefined (OK para DeepPartial)
-      // Campos opcionales: si no hay valor, los omitimos (no usamos null)
-      downPayment: dto.downPayment ?? undefined,
-      tradeInValue: dto.tradeInValue ?? undefined,
+      installmentValue,
+      // Campos opcionales
+      downPayment: downPayment || undefined,
+      tradeInValue: tradeInValue || undefined,
       prendarioMonths: dto.prendarioMonths ?? undefined,
       personalMonths: dto.personalMonths ?? undefined,
       financiacionMonths: dto.financiacionMonths ?? undefined,
     };
 
-    // Agregar condicionalmente tasas y montos (solo si existen)
+    // Agregar tasas y montos solo si existen
     if (prendarioRate?.rate != null) budgetBase.prendarioRate = prendarioRate.rate;
     if (personalRate?.rate != null) budgetBase.personalRate = personalRate.rate;
-    if (financiacionRate?.rate != null) budgetBase.financiacionRate = financiacionRate.rate;
+    if (financiacionRate?.rate != null)
+      budgetBase.financiacionRate = financiacionRate.rate;
 
-    if (prendarioConInteres != null) budgetBase.prendarioAmount = prendarioConInteres;
-    if (personalConInteres != null) budgetBase.personalAmount = personalConInteres;
-    if (financiacionConInteres != null) budgetBase.financiacionAmount = financiacionConInteres;
+    if (prendarioAmount) budgetBase.prendarioAmount = prendarioAmount;
+    if (personalAmount) budgetBase.personalAmount = personalAmount;
+    if (financiacionAmount) budgetBase.financiacionAmount = financiacionAmount;
 
-    const created = this.budgetsRepository.create(budgetBase);
-    const savedBudget: Budget = await this.budgetsRepository.save(created);
+    console.log('✅ Budget base a guardar:', budgetBase);
 
-    // 📊 Registrar en budget-reports (installmentValue como número; si no hay, 0)
+    const budget = this.budgetsRepository.create(budgetBase);
+    const saved = await this.budgetsRepository.save(budget);
+
+    // 📊 Crear registro en budget_reports (sin romper si falla)
     try {
       await this.budgetReportsService.create({
-        budgetId: savedBudget.id,
-        vehicleId: dto.vehicleId,
-        clientId: dto.clientId,
-        sellerId: dto.sellerId,
-        paymentType: dto.paymentType,
-        listPrice: dto.price,
-        finalPrice,
+        budgetId: saved.id,
+        vehicleId: vehicle.id,
+        clientId: client.id,
+        sellerId: dto.sellerId ?? null,
+        paymentType: dto.paymentType ?? 'N/A',
+        listPrice: Number(vehicle.price) || 0,
+        finalPrice: finalPrice,
         installments,
-        installmentValue: installmentValue ?? 0,
-        downPayment: dto.downPayment,
-        status: dto.status,
+        installmentValue: installmentValue ?? undefined,
+        downPayment: downPayment || undefined,
+        status: dto.status ?? 'pending',
       });
-      console.log(`✅ Reporte creado con tasas para budget ${savedBudget.id}`);
-    } catch (err) {
-      console.error('⚠️ No se pudo crear el registro en budget-reports:', err);
+    } catch (error) {
+      console.error(
+        '❌ Error al crear BudgetReport para el presupuesto',
+        saved.id,
+        error,
+      );
+      // No relanzamos el error para no impedir la creación del presupuesto
     }
 
-    return savedBudget;
+    return saved;
   }
 
   async update(id: number, dto: any) {
     const budget = await this.findOne(id);
-    Object.assign(budget, dto);
+
+    if (dto.status) {
+      budget.status = dto.status;
+    }
+
+    if (dto.paymentType !== undefined) budget.paymentType = dto.paymentType;
+    if (dto.installments !== undefined) budget.installments = dto.installments;
+    if (dto.downPayment !== undefined) budget.downPayment = dto.downPayment;
+    if (dto.tradeInValue !== undefined) budget.tradeInValue = dto.tradeInValue;
+    if (dto.prendarioAmount !== undefined)
+      budget.prendarioAmount = dto.prendarioAmount;
+    if (dto.personalAmount !== undefined)
+      budget.personalAmount = dto.personalAmount;
+    if (dto.financiacionAmount !== undefined)
+      budget.financiacionAmount = dto.financiacionAmount;
+    if (dto.finalPrice !== undefined) budget.finalPrice = dto.finalPrice;
+    if (dto.installmentValue !== undefined)
+      budget.installmentValue = dto.installmentValue;
+
+    if (dto.prendarioRate !== undefined) budget.prendarioRate = dto.prendarioRate;
+    if (dto.personalRate !== undefined) budget.personalRate = dto.personalRate;
+    if (dto.financiacionRate !== undefined)
+      budget.financiacionRate = dto.financiacionRate;
+
+    if (dto.prendarioMonths !== undefined)
+      budget.prendarioMonths = dto.prendarioMonths;
+    if (dto.personalMonths !== undefined)
+      budget.personalMonths = dto.personalMonths;
+    if (dto.financiacionMonths !== undefined)
+      budget.financiacionMonths = dto.financiacionMonths;
+
     return this.budgetsRepository.save(budget);
   }
 
@@ -181,169 +306,234 @@ export class BudgetsService {
     return this.budgetsRepository.remove(budget);
   }
 
-// ✅ Generar PDF con formato limpio, montos netos y sin “Precio Final”
-async getPdf(id: number): Promise<Buffer> {
-  const budget = await this.findOne(id);
+  // 🖨️ Generar PDF similar al de venta pero para presupuesto
+  async getPdf(id: number): Promise<Buffer> {
+    const budget = await this.findOne(id);
 
-  const dir = path.join(__dirname, '../../uploads/budgets', String(budget.id));
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  const filePath = path.join(dir, `presupuesto_${budget.id}.pdf`);
+    const dir = path.join(__dirname, '../../uploads/budgets', String(budget.id));
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, `presupuesto_${budget.id}.pdf`);
 
-  const doc = new PDFDocument({ margin: 50 });
-  const chunks: Buffer[] = [];
-  doc.on('data', (c) => chunks.push(c));
-  const done = new Promise<Buffer>((resolve) =>
-    doc.on('end', () => resolve(Buffer.concat(chunks))),
-  );
+    const doc = new PDFDocument({ margin: 50 });
+    const chunks: Buffer[] = [];
+    doc.on('data', (c) => chunks.push(c));
+    const done = new Promise<Buffer>((resolve) =>
+      doc.on('end', () => resolve(Buffer.concat(chunks))),
+    );
 
-  try {
-    const logoPath = path.join(__dirname, '../../logos/Logobyn.JPG');
-    if (fs.existsSync(logoPath)) {
-      doc.opacity(0.07).image(logoPath, 100, 180, { fit: [400, 400], align: 'center' });
-      doc.opacity(1);
+    try {
+      const logoPath = path.join(__dirname, '../../logos/Logobyn.JPG');
+      if (fs.existsSync(logoPath)) {
+        doc.opacity(0.07).image(logoPath, 100, 180, {
+          fit: [400, 400],
+          align: 'center',
+        });
+        doc.opacity(1);
+      }
+    } catch {
+      console.warn('⚠️ No se pudo cargar el logo de marca de agua');
     }
-  } catch {
-    console.warn('⚠️ No se pudo cargar el logo de marca de agua');
-  }
 
-  doc.fontSize(22).fillColor('#1e1e1e').text('DE GRAZIA AUTOMOTORES', { align: 'center' });
-  doc.fontSize(12).fillColor('#555').text('Presupuesto de Vehículo', { align: 'center' });
-  doc.fontSize(10).fillColor('#777').text(`Emitido el ${this.nowString()}`, { align: 'center' });
-  doc.moveDown(1);
-  doc.moveTo(50, doc.y).lineTo(550, doc.y).strokeColor('#009879').stroke();
-  doc.moveDown(1);
+    // Encabezado
+    doc.fontSize(22).fillColor('#1e1e1e').text('DE GRAZIA AUTOMOTORES', {
+      align: 'center',
+    });
+    doc.fontSize(12).fillColor('#555').text('Presupuesto de Venta', {
+      align: 'center',
+    });
+    doc.fontSize(10).fillColor('#777').text(
+      `Emitido el ${new Date().toLocaleDateString('es-AR')}`,
+      {
+        align: 'center',
+      },
+    );
+    doc.moveDown(1);
+    doc.moveTo(50, doc.y).lineTo(550, doc.y).strokeColor('#009879').stroke();
+    doc.moveDown(1);
 
-  const sectionTitle = (t: string) => {
-    doc.moveDown(0.6);
-    doc.fontSize(13).fillColor('#009879').text(t.toUpperCase(), { underline: true });
-    doc.moveDown(0.3);
-    doc.fontSize(11).fillColor('#1e1e1e');
-  };
-
-  const formatPesos = (valor?: number | null): string => {
-    if (valor == null) return '-';
-    return `$ ${valor.toLocaleString('es-AR', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    })}`;
-  };
-
-  const formatCuota = (monto: number | null | undefined, cuotas: number | null | undefined) => {
-    if (!monto || !cuotas) return '-';
-    const valor = monto / cuotas;
-    return `$ ${valor.toLocaleString('es-AR', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    })}`;
-  };
-
-  // 📋 Datos del presupuesto
-  sectionTitle('Datos del Presupuesto');
-  doc.text(`Número: ${budget.id}`);
-  doc.text(`Fecha: ${new Date(budget.createdAt).toLocaleDateString('es-AR')}`);
-  doc.text(`Forma de Pago: ${budget.paymentType || '-'}`);
-  if (budget.installments) doc.text(`Cantidad de Cuotas Totales: ${budget.installments}`);
-
-  // 💸 Montos principales
-  sectionTitle('Detalle de Montos');
-  if (budget.downPayment != null) doc.text(`Anticipo: ${formatPesos(budget.downPayment)}`);
-  if (budget.tradeInValue != null) doc.text(`Valor de Permuta: ${formatPesos(budget.tradeInValue)}`);
-  if (budget.price != null) doc.text(`Precio Lista: ${formatPesos(budget.price)}`);
-  if (budget.installmentValue != null)
-    doc.text(`Valor de Cuota Total: ${formatPesos(budget.installmentValue)}`);
-
-  // 💰 Detalle de préstamos
-  const hasLoans =
-    !!budget.prendarioAmount || !!budget.personalAmount || !!budget.financiacionAmount;
-
-  if (hasLoans) {
-    sectionTitle('Detalle de Préstamos y Financiaciones');
-
-    // Para mostrar el monto neto (sin interés)
-    const calcNeto = (montoConInteres?: number | null, tasa?: number | null) => {
-      if (!montoConInteres || !tasa) return montoConInteres || 0;
-      return montoConInteres / (1 + tasa / 100);
+    const sectionTitle = (t: string) => {
+      doc.moveDown(0.6);
+      doc.fontSize(13).fillColor('#009879').text(t.toUpperCase(), {
+        underline: true,
+      });
+      doc.moveDown(0.3);
+      doc.fontSize(11).fillColor('#1e1e1e');
     };
 
-    if (budget.prendarioAmount != null) {
-      const neto = calcNeto(budget.prendarioAmount, budget.prendarioRate);
-      doc.moveDown(0.5);
-      doc.fontSize(12).fillColor('#009879').text('Préstamo Prendario');
-      doc
-        .fontSize(11)
-        .fillColor('#000')
-        .text(`Monto (neto): ${formatPesos(neto)}`)
-        .text(`Tasa aplicada: ${budget.prendarioRate ?? 0}%`)
-        .text(`Cuotas: ${budget.prendarioMonths ?? '-'}`)
-        .text(`Valor de cada cuota: ${formatCuota(budget.prendarioAmount, budget.prendarioMonths)}`);
+    const formatPesos = (valor?: number | null): string => {
+      if (valor == null) return '-';
+      return `$ ${valor.toLocaleString('es-AR', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })}`;
+    };
+
+    // Datos del presupuesto
+    sectionTitle('Datos del Presupuesto');
+    doc.text(`Número: ${budget.id}`);
+    doc.text(
+      `Fecha: ${new Date(budget.createdAt).toLocaleDateString('es-AR')}`,
+    );
+    if (budget.paymentType) {
+      doc.text(`Forma de Pago: ${budget.paymentType}`);
+    }
+    if (budget.installments) {
+      doc.text(`Cantidad de Cuotas: ${budget.installments}`);
     }
 
-    if (budget.personalAmount != null) {
-      const neto = calcNeto(budget.personalAmount, budget.personalRate);
-      doc.moveDown(0.8);
-      doc.fontSize(12).fillColor('#009879').text('Préstamo Personal');
-      doc
-        .fontSize(11)
-        .fillColor('#000')
-        .text(`Monto (neto): ${formatPesos(neto)}`)
-        .text(`Tasa aplicada: ${budget.personalRate ?? 0}%`)
-        .text(`Cuotas: ${budget.personalMonths ?? '-'}`)
-        .text(`Valor de cada cuota: ${formatCuota(budget.personalAmount, budget.personalMonths)}`);
-    }
+    // Montos principales
+    sectionTitle('Detalle de Montos');
+    if (budget.downPayment != null)
+      doc.text(`Anticipo: ${formatPesos(budget.downPayment)}`);
+    if (budget.tradeInValue != null)
+      doc.text(`Valor de Permuta: ${formatPesos(budget.tradeInValue)}`);
+    if (budget.price != null)
+      doc.text(`Precio Lista: ${formatPesos(budget.price)}`);
+    if (budget.installmentValue != null)
+      doc.text(`Valor de Cuota Total: ${formatPesos(budget.installmentValue)}`);
 
-    if (budget.financiacionAmount != null) {
-      const neto = calcNeto(budget.financiacionAmount, budget.financiacionRate);
-      doc.moveDown(0.8);
-      doc.fontSize(12).fillColor('#009879').text('Financiación Personal');
-      doc
-        .fontSize(11)
-        .fillColor('#000')
-        .text(`Monto (neto): ${formatPesos(neto)}`)
-        .text(`Tasa aplicada: ${budget.financiacionRate ?? 0}%`)
-        .text(`Cuotas: ${budget.financiacionMonths ?? '-'}`)
-        .text(
-          `Valor de cada cuota: ${formatCuota(
-            budget.financiacionAmount,
-            budget.financiacionMonths,
-          )}`,
+    // Detalle de préstamos
+    const hasLoans =
+      !!budget.prendarioAmount ||
+      !!budget.personalAmount ||
+      !!budget.financiacionAmount;
+
+    if (hasLoans) {
+      sectionTitle('Detalle de Préstamos y Financiaciones');
+
+      // Los montos guardados en presupuesto son NETOS (sin interés).
+      // Acá calculamos el monto financiado y la cuota con interés para mostrar.
+      const calcConInteres = (montoNeto?: number | null, tasa?: number | null) => {
+        if (!montoNeto) return 0;
+        if (!tasa) return montoNeto;
+        return montoNeto * (1 + tasa / 100);
+      };
+
+      if (budget.prendarioAmount != null) {
+        const montoNeto = budget.prendarioAmount;
+        const montoConInteres = calcConInteres(
+          budget.prendarioAmount,
+          budget.prendarioRate,
         );
+        const cuota =
+          budget.installments && budget.installments > 0
+            ? montoConInteres / budget.installments
+            : 0;
+
+        doc.moveDown(0.5);
+        doc.fontSize(12).fillColor('#009879').text('Préstamo Prendario');
+        doc
+          .fontSize(11)
+          .fillColor('#000')
+          .text(`Monto (neto): ${formatPesos(montoNeto)}`)
+          .text(`Tasa aplicada: ${budget.prendarioRate ?? 0}%`)
+          .text(`Cuotas: ${budget.installments ?? '-'}`)
+          .text(
+            `Valor de cada cuota (con financiación): ${formatPesos(cuota)}`,
+          );
+      }
+
+      if (budget.personalAmount != null) {
+        const montoNeto = budget.personalAmount;
+        const montoConInteres = calcConInteres(
+          budget.personalAmount,
+          budget.personalRate,
+        );
+        const cuota =
+          budget.installments && budget.installments > 0
+            ? montoConInteres / budget.installments
+            : 0;
+
+        doc.moveDown(0.5);
+        doc.fontSize(12).fillColor('#009879').text('Préstamo Personal');
+        doc
+          .fontSize(11)
+          .fillColor('#000')
+          .text(`Monto (neto): ${formatPesos(montoNeto)}`)
+          .text(`Tasa aplicada: ${budget.personalRate ?? 0}%`)
+          .text(`Cuotas: ${budget.installments ?? '-'}`)
+          .text(
+            `Valor de cada cuota (con financiación): ${formatPesos(cuota)}`,
+          );
+      }
+
+      if (budget.financiacionAmount != null) {
+        const montoNeto = budget.financiacionAmount;
+        const montoConInteres = calcConInteres(
+          budget.financiacionAmount,
+          budget.financiacionRate,
+        );
+        const cuota =
+          budget.installments && budget.installments > 0
+            ? montoConInteres / budget.installments
+            : 0;
+
+        doc.moveDown(0.5);
+        doc.fontSize(12).fillColor('#009879').text('Financiación Personal');
+        doc
+          .fontSize(11)
+          .fillColor('#000')
+          .text(`Monto (neto): ${formatPesos(montoNeto)}`)
+          .text(`Tasa aplicada: ${budget.financiacionRate ?? 0}%`)
+          .text(`Cuotas: ${budget.installments ?? '-'}`)
+          .text(
+            `Valor de cada cuota (con financiación): ${formatPesos(cuota)}`,
+          );
+      }
     }
-  }
 
-  // 👤 Cliente
-  if (budget.client) {
-    sectionTitle('Cliente');
-    doc.text(`${budget.client.firstName} ${budget.client.lastName}`);
-    doc.text(`DNI: ${budget.client.dni}`);
-    if (budget.client.phone) doc.text(`Teléfono: ${budget.client.phone}`);
-    if (budget.client.address) doc.text(`Domicilio: ${budget.client.address}`);
-  }
+    // Cliente
+    if (budget.client) {
+      sectionTitle('Cliente');
+      doc.text(
+        `Nombre: ${budget.client.firstName} ${budget.client.lastName}`,
+      );
+      if ((budget.client as any).dni) {
+        doc.text(`DNI: ${(budget.client as any).dni}`);
+      }
+    }
 
-  // 🚗 Vehículo
-  if (budget.vehicle) {
-    sectionTitle('Vehículo');
-    doc.text(`${budget.vehicle.brand} ${budget.vehicle.model} ${budget.vehicle.versionName || ''}`);
-    if (budget.vehicle.year) doc.text(`Año: ${budget.vehicle.year}`);
-    if (budget.vehicle.color) doc.text(`Color: ${budget.vehicle.color}`);
-    if (budget.vehicle.plate) doc.text(`Patente: ${budget.vehicle.plate}`);
-  }
+    // Vehículo
+    if (budget.vehicle) {
+      sectionTitle('Vehículo');
+      doc.text(
+        `${budget.vehicle.brand} ${budget.vehicle.model} ${
+          budget.vehicle.versionName || ''
+        }`,
+      );
+      if (budget.vehicle.year) doc.text(`Año: ${budget.vehicle.year}`);
+      if (budget.vehicle.color) doc.text(`Color: ${budget.vehicle.color}`);
+      if (budget.vehicle.plate) doc.text(`Patente: ${budget.vehicle.plate}`);
+    }
 
-  // ⚖️ Condiciones legales
-  doc.moveDown(2);
-  doc.moveTo(50, doc.y).lineTo(550, doc.y).strokeColor('#ccc').stroke();
-  doc.moveDown(1);
-  doc.fontSize(13).fillColor('#009879').text('CONDICIONES LEGALES Y COMERCIALES', { underline: true });
-  doc.moveDown(0.5);
-  const legales = `
-1. Naturaleza del presupuesto: El presente documento no implica oferta irrevocable de venta ni contrato alguno, sino un presupuesto de carácter estimativo, sujeto a verificación de disponibilidad del vehículo y aprobación comercial por parte de la agencia. 2. Vigencia: La cotización tendrá una vigencia de cuarenta y ocho (48) horas corridas desde la fecha de emisión. Vencido dicho plazo, la Agencia podrá modificar o dejar sin efecto los valores consignados sin necesidad de aviso previo. 3: Alcance de los precios: Los precios indicados comprenden únicamente el valor del vehículo detallado, no incluyendo gastos de transferencia, sellados, gestoría, formularios ni otros costos administrativos. 4. Financiación: En caso de optar el cliente por alguna forma definanciación, los montos, tasas y cuotas tienen carácter estimativo, quedando supeditados a la evaluación crediticia y aprobación final que realicen las entidades financieras o bancarias intervinientes. La Agencia no garantiza la aprobación del crédito ni las condiciones finales de la financiación. 5. Formalización de la operación: Toda operación se formalizará únicamente mediante la transferencia registral, conforme la normativa DNRPA vigente, una vez acreditado el pago total del precio y/o una vez dispuesta la aprobación definitiva del crédito por el que el cliente optare. 6. Entrega del vehículo: La entrega se realizará únicamente luego de acreditado el pago total y/o una vez firmada la documentación contractual y registral correspondiente. 7. Imágenes y descripciones: Las imágenes, descripciones y datos del vehículo tienen carácter meramente ilustrativo, debiendo ser verificados personalmente por el interesado al momento de la inspección del vehículo por su parte.
+    // Condiciones legales
+    doc.moveDown(2);
+    doc.moveTo(50, doc.y).lineTo(550, doc.y).strokeColor('#ccc').stroke();
+    doc.moveDown(1);
+    doc
+      .fontSize(13)
+      .fillColor('#009879')
+      .text('CONDICIONES LEGALES Y COMERCIALES', { underline: true });
+    doc.moveDown(0.5);
+    const legales = `
+1. Naturaleza del presupuesto: El presente documento no implica obligación de compra ni reserva del vehículo. Tiene carácter informativo y refleja una propuesta comercial vigente a la fecha de emisión.
+2. Vigencia: Los precios, tasas de financiación y condiciones aquí indicadas podrán variar sin previo aviso en función de modificaciones de listas de precios, condiciones de entidades financieras o disposiciones impositivas.
+3. Financiación: La aprobación y condiciones definitivas de los préstamos (prendario, personal o financiación directa) quedan sujetas a evaluación crediticia, políticas de riesgo y documentación respaldatoria requerida por la entidad interviniente.
+4. Entrega del vehículo: La entrega se realizará únicamente luego de acreditado el pago total del precio de venta o de cumplidas las condiciones mínimas acordadas en caso de financiación, incluyendo firma de documentación y eventuales garantías.
+5. Permuta: El valor de la unidad usada tomada en parte de pago es estimativo y podrá ajustarse según el estado real del vehículo, documentación y tasación definitiva efectuada por el concesionario.
+6. Modificaciones: Cualquier cambio en las condiciones aquí descriptas deberá constar por escrito en un nuevo presupuesto o anexo, firmado por las partes.
+7. Aceptación: La firma del presente presupuesto por parte del cliente implica la lectura y aceptación de las condiciones detalladas, sin perjuicio de las posteriores formalidades contractuales que correspondan.
+8. Información adicional: Para mayor detalle sobre tasas, plazos, seguros, gastos administrativos u otros cargos, el interesado podrá requerir información ampliatoria al momento de la inspección del vehículo por su parte.
 `;
-  doc.fontSize(8.5).fillColor('#555').text(legales, { align: 'justify', lineGap: 2.5 });
+    doc
+      .fontSize(8.5)
+      .fillColor('#555')
+      .text(legales, { align: 'justify', lineGap: 2.5 });
 
-  doc.end();
-  await done;
-  const pdfBuffer = Buffer.concat(chunks);
-  fs.writeFileSync(filePath, pdfBuffer);
-  return pdfBuffer;
-}
-
+    doc.end();
+    await done;
+    const pdfBuffer = Buffer.concat(chunks);
+    fs.writeFileSync(filePath, pdfBuffer);
+    return pdfBuffer;
+  }
 }

@@ -215,6 +215,7 @@ export class InstallmentPaymentService {
         'installment.sale',
         'installment.sale.client',
         'installment.sale.installments',
+        'installment.sale.vehicle',
       ],
       order: { id: 'ASC' },
     });
@@ -229,6 +230,7 @@ export class InstallmentPaymentService {
         'installment.sale',
         'installment.sale.client',
         'installment.sale.installments',
+        'installment.sale.vehicle',
       ],
     });
     if (!payment) throw new NotFoundException('InstallmentPayment not found');

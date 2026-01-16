@@ -35,7 +35,7 @@ export class UsersController {
     return this.usersService.create(dto);
   }
 
-  // ✅ Actualizar usuario (parcial) — corrección principal
+  // ✅ Actualizar usuario (parcial)
   @Patch(':id')
   update(
     @Param('id', ParseIntPipe) id: number,

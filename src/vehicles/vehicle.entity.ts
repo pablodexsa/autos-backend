@@ -59,6 +59,10 @@ export class Vehicle {
   @Column({ default: false })
   sold: boolean; // ✅ para filtros en budgets.service
 
+  // 📁 Ruta relativa del archivo de documentación del vehículo (PDF, imágenes, etc.)
+  @Column({ name: 'documentation_path', type: 'text', nullable: true })
+  documentationPath: string | null;
+
   @CreateDateColumn()
   createdAt: Date;
 

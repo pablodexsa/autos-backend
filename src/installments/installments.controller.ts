@@ -28,7 +28,7 @@ export class InstallmentsController {
     return this.installmentsService.findOne(id);
   }
 
-  // 💳 Registrar pago total o parcial (NUEVO)
+  // 💳 Registrar pago total o parcial
   @Patch(':id/register-payment')
   registerPayment(
     @Param('id', ParseIntPipe) id: number,

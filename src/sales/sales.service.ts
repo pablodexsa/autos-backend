@@ -58,7 +58,7 @@ export class SalesService {
   }
 
   // 🧾 Crear nueva venta
-  async create(dto: CreateSaleDto) {
+  async create(dto: CreateSaleDto, sellerId?: number, sellerName?: string) {
     const vehicle = await this.vehicleRepo.findOne({ where: { id: dto.vehicleId } });
     if (!vehicle) throw new NotFoundException('Vehicle not found');
 
@@ -76,6 +76,10 @@ export class SalesService {
     const sale = this.salesRepo.create({
       ...dto,
       client: client ?? undefined,
+
+      // 🧑‍💼 Vendedor
+      sellerId: sellerId ?? null,
+      sellerName: sellerName ?? null,
 
       // 👇 mapeamos explícitamente los campos de permuta
       hasTradeIn: dto.hasTradeIn,
@@ -182,13 +186,32 @@ export class SalesService {
     return sale;
   }
 
-  // 🆕 Helper: obtener tasa desde la tabla loan_rates
+  // 🆕 Helper: obtener tasa desde la tabla loan_rates, aplicando tramos 1–12 / 13–24 / 25–36
   private async getRate(
     type: 'prendario' | 'personal' | 'financiacion',
     months?: number | null,
   ): Promise<number> {
     if (!months) return 0;
-    const row = await this.loanRateRepo.findOne({ where: { type, months } });
+
+    // Normalizamos la cantidad real de cuotas al tramo configurado:
+    // 1–12  -> usa la tasa de 12
+    // 13–24 -> usa la tasa de 24
+    // 25–36 -> usa la tasa de 36
+    let bracket: number;
+    if (months <= 12) {
+      bracket = 12;
+    } else if (months <= 24) {
+      bracket = 24;
+    } else if (months <= 36) {
+      bracket = 36;
+    } else {
+      // Fuera del rango soportado, no aplicamos tasa
+      return 0;
+    }
+
+    const row = await this.loanRateRepo.findOne({
+      where: { type, months: bracket },
+    });
     return row?.rate ?? 0;
   }
 
@@ -464,12 +487,24 @@ export class SalesService {
     return pdfBuffer;
   }
 
-  private labelPayment(comp?: any): string {
+  // 👇 NUEVA LÓGICA DE ETIQUETA DE FORMA DE PAGO PARA EL PDF
+  private labelPayment(comp?: {
+    hasAdvance?: boolean;
+    hasPrendario?: boolean;
+    hasPersonal?: boolean;
+    hasFinancing?: boolean;
+  } | null): string {
     if (!comp) return '-';
-    if (comp.hasFinancing)
-      return 'Anticipo + Prendario + Personal + Financiación';
-    if (comp.hasPersonal) return 'Anticipo + Prendario + Personal';
-    if (comp.hasPrendario) return 'Anticipo + Préstamo Prendario';
+
+    const hasAnyFinancing =
+      !!comp.hasPrendario || !!comp.hasPersonal || !!comp.hasFinancing;
+
+    if (hasAnyFinancing) {
+      // Cualquier esquema con cuotas: se muestra como "Anticipo + Financiación"
+      return 'Anticipo + Financiación';
+    }
+
+    // Sin financiación: venta al contado (con o sin permuta/anticipo)
     return 'Contado';
   }
 }

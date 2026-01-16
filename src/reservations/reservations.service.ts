@@ -9,7 +9,7 @@ import { User } from '../users/user.entity';
 import * as fs from 'fs';
 import * as path from 'path';
 import PDFDocument from 'pdfkit';
-
+import { SettingsService } from '../settings/settings.service';
 
 const pesos = (n: number) =>
   new Intl.NumberFormat('es-AR', {
@@ -35,125 +35,144 @@ export class ReservationsService {
 
     @InjectRepository(User)
     private userRepo: Repository<User>,
+
+    private readonly settings: SettingsService,
   ) {}
 
-  private getDefaultAmount(): number {
-    return 500000;
+  private readonly AR_TZ = 'America/Argentina/Buenos_Aires';
+
+  private formatDateTimeAR(d: Date): string {
+    return d.toLocaleString('es-AR', {
+      timeZone: 'America/Argentina/Buenos_Aires',
+      hour12: false, // 24 hs
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
   }
 
-private readonly AR_TZ = 'America/Argentina/Buenos_Aires';
-
-private formatDateTimeAR(d: Date): string {
-  return d.toLocaleString('es-AR', {
-    timeZone: 'America/Argentina/Buenos_Aires',
-    hour12: false, // <- fuerza 24 horas
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-
-/**
- * Feriados configurables.
- * - AR_HOLIDAYS puede incluir fechas YYYY-MM-DD separadas por coma.
- *   Ej: "2025-01-01,2025-03-24,2025-12-25". Esta en el .env
- */
-private getHolidaySet(): Set<string> {
-  const raw = (process.env.AR_HOLIDAYS ?? '').trim();
-  const items = raw
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return new Set(items);
-}
-
-private ymdInTz(date: Date): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: this.AR_TZ,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(date);
-
-  const y = parts.find((p) => p.type === 'year')?.value ?? '1970';
-  const m = parts.find((p) => p.type === 'month')?.value ?? '01';
-  const d = parts.find((p) => p.type === 'day')?.value ?? '01';
-  return `${y}-${m}-${d}`; // YYYY-MM-DD
-}
-
-private weekdayInTz(date: Date): number {
-  // 0=domingo ... 6=sábado, pero calculado en TZ AR, no en UTC
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: this.AR_TZ,
-    weekday: 'short',
-  }).formatToParts(date);
-
-  const wd = parts.find((p) => p.type === 'weekday')?.value ?? 'Sun';
-  const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
-  return map[wd] ?? 0;
-}
-
-private isBusinessDay(date: Date, holidays: Set<string>): boolean {
-  const wd = this.weekdayInTz(date);
-  if (wd === 0) return false; // domingo NO hábil
-  const ymd = this.ymdInTz(date);
-  if (holidays.has(ymd)) return false; // feriado NO hábil
-  return true; // lunes-sábado hábil
-}
-
-/**
- * Suma "horas hábiles" (sábado cuenta, domingo y feriados no).
- * Implementación mínima: avanza de a 1 hora y sólo descuenta cuando cae en día hábil.
- */
-private plusHours(d: Date, hours: number) {
-  const holidays = this.getHolidaySet();
-  let remaining = hours;
-  let cur = new Date(d);
-
-  while (remaining > 0) {
-    cur = new Date(cur.getTime() + 60 * 60 * 1000); // +1 hora
-    if (this.isBusinessDay(cur, holidays)) remaining--;
+  /**
+   * Feriados configurables.
+   * - AR_HOLIDAYS puede incluir fechas YYYY-MM-DD separadas por coma.
+   *   Ej: "2025-01-01,2025-03-24,2025-12-25". Está en el .env
+   */
+  private getHolidaySet(): Set<string> {
+    const raw = (process.env.AR_HOLIDAYS ?? '').trim();
+    const items = raw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return new Set(items);
   }
 
-  return cur;
-}
+  private ymdInTz(date: Date): string {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: this.AR_TZ,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(date);
 
+    const y = parts.find((p) => p.type === 'year')?.value ?? '1970';
+    const m = parts.find((p) => p.type === 'month')?.value ?? '01';
+    const d = parts.find((p) => p.type === 'day')?.value ?? '01';
+    return `${y}-${m}-${d}`; // YYYY-MM-DD
+  }
 
-private nowString(): string {
-  return new Date().toLocaleString('es-AR', {
-    timeZone: 'America/Argentina/Buenos_Aires',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
-}
+  private weekdayInTz(date: Date): number {
+    // 0=domingo ... 6=sábado, pero calculado en TZ AR, no en UTC
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: this.AR_TZ,
+      weekday: 'short',
+    }).formatToParts(date);
 
+    const wd = parts.find((p) => p.type === 'weekday')?.value ?? 'Sun';
+    const map: Record<string, number> = {
+      Sun: 0,
+      Mon: 1,
+      Tue: 2,
+      Wed: 3,
+      Thu: 4,
+      Fri: 5,
+      Sat: 6,
+    };
+    return map[wd] ?? 0;
+  }
+
+  private isBusinessDay(date: Date, holidays: Set<string>): boolean {
+    const wd = this.weekdayInTz(date);
+    if (wd === 0) return false; // domingo NO hábil
+    const ymd = this.ymdInTz(date);
+    if (holidays.has(ymd)) return false; // feriado NO hábil
+    return true; // lunes-sábado hábil
+  }
+
+  /**
+   * Suma "horas hábiles" (sábado cuenta, domingo y feriados no).
+   * Implementación mínima: avanza de a 1 hora y sólo descuenta cuando cae en día hábil.
+   */
+  private plusHours(d: Date, hours: number) {
+    const holidays = this.getHolidaySet();
+    let remaining = hours;
+    let cur = new Date(d);
+
+    while (remaining > 0) {
+      cur = new Date(cur.getTime() + 60 * 60 * 1000); // +1 hora
+      if (this.isBusinessDay(cur, holidays)) remaining--;
+    }
+
+    return cur;
+  }
+
+  private nowString(): string {
+    return new Date().toLocaleString('es-AR', {
+      timeZone: 'America/Argentina/Buenos_Aires',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+  }
 
   async findAll() {
     const list = await this.reservationsRepo.find({
-      relations: ['client', 'vehicle', 'guarantors'],
+      relations: ['client', 'vehicle', 'guarantors', 'seller'],
       order: { id: 'DESC' },
     });
 
-    return list.map((r) => ({
-      id: r.id,
-      clientDni: r.client?.dni || '-',
-      clientName: r.client ? `${r.client.firstName} ${r.client.lastName}` : 'Sin cliente',
-      vehicle: r.vehicle
-        ? `${r.vehicle.brand} ${r.vehicle.model} ${r.vehicle.versionName || ''}`
-        : 'Sin vehículo',
-      plate: r.vehicle?.plate || '-',
-      date: r.date,
-      status: r.status,
-      updatedAt: r.updatedAt,
-      guarantors: r.guarantors ?? [],
-    }));
+    return list.map((r) => {
+      const seller = r.seller as any;
+      const sellerFullName =
+        seller
+          ? `${seller.firstName ?? ''} ${seller.lastName ?? ''}`.trim() ||
+            seller.name ||
+            seller.username ||
+            null
+          : null;
+
+      return {
+        id: r.id,
+        clientDni: r.client?.dni || '-',
+        clientName: r.client
+          ? `${r.client.firstName} ${r.client.lastName}`
+          : 'Sin cliente',
+        vehicle: r.vehicle
+          ? `${r.vehicle.brand} ${r.vehicle.model} ${
+              r.vehicle.versionName || ''
+            }`
+          : 'Sin vehículo',
+        plate: r.vehicle?.plate || '-',
+        date: r.date,
+        status: r.status,
+        updatedAt: r.updatedAt,
+        guarantors: r.guarantors ?? [],
+        sellerName: sellerFullName,
+      };
+    });
   }
 
   async findOne(id: number) {
@@ -161,7 +180,9 @@ private nowString(): string {
       where: { id },
       relations: ['client', 'vehicle', 'guarantors', 'seller'],
     });
-    if (!reservation) throw new NotFoundException(`Reserva con ID ${id} no encontrada`);
+    if (!reservation) {
+      throw new NotFoundException(`Reserva con ID ${id} no encontrada`);
+    }
     return reservation;
   }
 
@@ -174,17 +195,22 @@ private nowString(): string {
     date?: string;
   }) {
     let client: Client | null = null;
-    if (dto.clientId) client = await this.clientRepo.findOne({ where: { id: dto.clientId } });
-    else if (dto.clientDni)
+    if (dto.clientId) {
+      client = await this.clientRepo.findOne({ where: { id: dto.clientId } });
+    } else if (dto.clientDni) {
       client = await this.clientRepo.findOne({ where: { dni: dto.clientDni } });
+    }
 
-    if (!client) throw new BadRequestException('Cliente no encontrado por DNI/ID');
+    if (!client) {
+      throw new BadRequestException('Cliente no encontrado por DNI/ID');
+    }
 
     const vehicle = await this.vehicleRepo.findOne({ where: { plate: dto.plate } });
     if (!vehicle) throw new BadRequestException('Vehículo no encontrado');
     if (vehicle.sold) throw new BadRequestException('El vehículo está vendido');
-    if (vehicle.status?.toLowerCase() === 'reserved')
+    if (vehicle.status?.toLowerCase() === 'reserved') {
       throw new BadRequestException('El vehículo ya está reservado');
+    }
 
     const sellerEntity = dto.sellerId
       ? ((await this.userRepo.findOne({ where: { id: dto.sellerId } })) as any)
@@ -193,17 +219,36 @@ private nowString(): string {
     const date = dto.date ? new Date(dto.date) : new Date();
     const expiry = this.plusHours(date, 48);
 
+    // 🔹 Obtener monto por defecto desde settings (reservation.amount)
+    const defaultAmount = await this.settings.getNumber(
+      'reservation.amount',
+      500_000,
+    );
+
+    let amount: number;
+    if (dto.amount != null) {
+      amount = Number(dto.amount);
+    } else {
+      amount = defaultAmount;
+    }
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new BadRequestException('Monto de reserva inválido');
+    }
+
     const reservation = this.reservationsRepo.create({
       client,
       vehicle,
       seller: sellerEntity,
-      amount: Number(dto.amount ?? this.getDefaultAmount()),
+      amount,
       date,
       expiryDate: expiry,
       status: 'Vigente',
       updatedAt: new Date(),
       plate: vehicle.plate,
-      vehicleLabel: `${vehicle.brand} ${vehicle.model} ${vehicle.versionName || ''}`.trim(),
+      vehicleLabel: `${vehicle.brand} ${vehicle.model} ${
+        vehicle.versionName || ''
+      }`.trim(),
     });
 
     const saved = await this.reservationsRepo.save(reservation);
@@ -214,7 +259,7 @@ private nowString(): string {
     return saved;
   }
 
-  // ✅ Método actualizado
+  // ✅ Método actualizado (estados y sincronización con vehículo)
   async update(id: number, dto: { status?: Reservation['status'] }) {
     const res = await this.findOne(id);
 
@@ -287,7 +332,7 @@ private nowString(): string {
     }
   }
 
-  // 🧭 Nuevo: ejecutar expiración manual (para usar desde el controlador)
+  // 🧭 Ejecutar expiración manual (para usar desde el controlador)
   async forceExpire(): Promise<{ expired: number }> {
     await this.expirePastReservations();
     return { expired: 1 };
@@ -296,7 +341,9 @@ private nowString(): string {
   async extendReservationsWithNewGuarantors(): Promise<void> {
     const now = new Date();
     const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-    const reservations = await this.reservationsRepo.find({ relations: ['guarantors'] });
+    const reservations = await this.reservationsRepo.find({
+      relations: ['guarantors'],
+    });
 
     for (const reservation of reservations) {
       if (reservation.status !== 'Vigente') continue;
@@ -304,7 +351,10 @@ private nowString(): string {
         (g) => new Date(g.createdAt) > cutoff,
       );
       if (recentGuarantors.length > 0) {
-        reservation.expiryDate = this.plusHours(new Date(reservation.expiryDate), 24);
+        reservation.expiryDate = this.plusHours(
+          new Date(reservation.expiryDate),
+          24,
+        );
         reservation.updatedAt = new Date();
         await this.reservationsRepo.save(reservation);
         console.log(
@@ -316,7 +366,13 @@ private nowString(): string {
 
   async addGuarantor(
     reservationId: number,
-    data: { firstName: string; lastName: string; dni: string; address?: string; phone?: string },
+    data: {
+      firstName: string;
+      lastName: string;
+      dni: string;
+      address?: string;
+      phone?: string;
+    },
     files: { dniFile?: any[]; payslipFile?: any[] },
   ) {
     const reservation = await this.findOne(reservationId);
@@ -365,7 +421,7 @@ private nowString(): string {
     return updated;
   }
 
-  // ✅ PDF generación (sin cambios)
+  // ✅ PDF generación
   async getPdf(id: number): Promise<Buffer> {
     const res = await this.reservationsRepo.findOne({
       where: { id },
@@ -392,7 +448,10 @@ private nowString(): string {
     try {
       const logoPath = path.join(__dirname, '../../logos/Logobyn.JPG');
       if (fs.existsSync(logoPath)) {
-        doc.opacity(0.07).image(logoPath, 100, 180, { fit: [400, 400], align: 'center' });
+        doc.opacity(0.07).image(logoPath, 100, 180, {
+          fit: [400, 400],
+          align: 'center',
+        });
         doc.opacity(1);
       }
     } catch {}
@@ -415,7 +474,9 @@ private nowString(): string {
 
     const sectionTitle = (t: string) => {
       doc.moveDown(0.6);
-      doc.fontSize(13).fillColor('#009879').text(t.toUpperCase(), { underline: true });
+      doc.fontSize(13).fillColor('#009879').text(t.toUpperCase(), {
+        underline: true,
+      });
       doc.moveDown(0.3);
       doc.fontSize(11).fillColor('#1e1e1e');
     };
@@ -425,8 +486,9 @@ private nowString(): string {
     doc.text(`Estado: ${res.status}`);
     doc.text(`Importe de Reserva: ${pesos(Number(res.amount))}`);
     doc.text(`Fecha: ${new Date(res.date).toLocaleDateString('es-AR')}`);
-    doc.text(`Vigencia hasta: ${this.formatDateTimeAR(new Date(res.expiryDate))}`);
-
+    doc.text(
+      `Vigencia hasta: ${this.formatDateTimeAR(new Date(res.expiryDate))}`,
+    );
 
     sectionTitle('Cliente');
     doc.text(`${res.client.firstName} ${res.client.lastName}`);
@@ -443,9 +505,14 @@ private nowString(): string {
     if (res.seller) {
       sectionTitle('Vendedor');
       const seller = res.seller as any;
-      doc.text(`${seller.firstName ?? ''} ${seller.lastName ?? ''}`);
-      if (seller.email) doc.text(`Email: ${seller.email}`);
-      if (seller.phone) doc.text(`Teléfono: ${seller.phone}`);
+      const sellerFullName =
+        `${seller.firstName ?? ''} ${seller.lastName ?? ''}`.trim() ||
+        seller.name ||
+        seller.username ||
+        '';
+      if (sellerFullName) {
+        doc.text(sellerFullName);
+      }
     }
 
     doc.moveDown(1);
@@ -453,7 +520,9 @@ private nowString(): string {
       .fontSize(9)
       .fillColor('#555')
       .text(
-        `Esta reserva tendrá vigencia hasta ${this.formatDateTimeAR(new Date(res.expiryDate))}. En caso de no integrarse el saldo o no presentar la documentación de garantes, quedará sin efecto.`,
+        `Esta reserva tendrá vigencia hasta ${this.formatDateTimeAR(
+          new Date(res.expiryDate),
+        )}. En caso de no integrarse el saldo o no presentar la documentación de garantes, quedará sin efecto.`,
         { align: 'justify' },
       );
 

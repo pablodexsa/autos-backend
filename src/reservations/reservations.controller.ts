@@ -46,11 +46,17 @@ export class ReservationsController {
       const created = await this.reservationsService.create(dto);
       const buffer = await this.reservationsService.getPdf(created.id);
 
-      const dir = path.join(__dirname, '../../uploads/reservations', String(created.id));
+      const dir = path.join(
+        __dirname,
+        '../../uploads/reservations',
+        String(created.id),
+      );
       let fileName = `Reserva-${created.id}.pdf`;
 
       if (fs.existsSync(dir)) {
-        const pdfFiles = fs.readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.pdf'));
+        const pdfFiles = fs
+          .readdirSync(dir)
+          .filter((f) => f.toLowerCase().endsWith('.pdf'));
         if (pdfFiles.length > 0) fileName = pdfFiles[0];
       }
 
@@ -93,7 +99,9 @@ export class ReservationsController {
   // 🔹 Agregar garante con archivos adjuntos
   @Post(':id/guarantors')
   @UseInterceptors(AnyFilesInterceptor())
-  @ApiOperation({ summary: 'Agregar garante a una reserva con archivos adjuntos' })
+  @ApiOperation({
+    summary: 'Agregar garante a una reserva con archivos adjuntos',
+  })
   async addGuarantor(
     @Param('id', ParseIntPipe) id: number,
     @Body() data: any,
@@ -117,15 +125,23 @@ export class ReservationsController {
 
   // 🔹 Descargar PDF de reserva con nombre correcto
   @Get(':id/pdf')
-  @ApiOperation({ summary: 'Descargar comprobante de reserva en PDF con nombre real' })
+  @ApiOperation({
+    summary: 'Descargar comprobante de reserva en PDF con nombre real',
+  })
   async pdf(@Param('id', ParseIntPipe) id: number, @Res() res: Response) {
     try {
       const buffer = await this.reservationsService.getPdf(id);
-      const dir = path.join(__dirname, '../../uploads/reservations', String(id));
+      const dir = path.join(
+        __dirname,
+        '../../uploads/reservations',
+        String(id),
+      );
       let fileName = `Reserva-${id}.pdf`;
 
       if (fs.existsSync(dir)) {
-        const pdfs = fs.readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.pdf'));
+        const pdfs = fs
+          .readdirSync(dir)
+          .filter((f) => f.toLowerCase().endsWith('.pdf'));
         if (pdfs.length > 0) fileName = pdfs[0];
       }
 
@@ -149,7 +165,9 @@ export class ReservationsController {
 
   // 🔹 NUEVO ENDPOINT: Forzar expiración manual de reservas
   @Post('expire')
-  @ApiOperation({ summary: 'Marcar manualmente las reservas vencidas y liberar vehículos' })
+  @ApiOperation({
+    summary: 'Marcar manualmente las reservas vencidas y liberar vehículos',
+  })
   async forceExpire() {
     try {
       const result = await this.reservationsService.forceExpire();

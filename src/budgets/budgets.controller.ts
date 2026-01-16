@@ -32,7 +32,7 @@ export class BudgetsController {
   @Post()
   async create(@Body() dto: any) {
     const savedBudget = await this.budgetsService.create(dto);
-    return savedBudget; // ✅ se devuelve el registro guardado, no el PDF
+    return savedBudget; // se devuelve el registro guardado, no el PDF
   }
 
   // ✏️ Actualizar presupuesto existente

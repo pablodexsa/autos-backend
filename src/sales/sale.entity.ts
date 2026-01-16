@@ -10,6 +10,7 @@
 import { Vehicle } from '../vehicles/vehicle.entity';
 import { Client } from '../clients/entities/client.entity';
 import { Installment } from '../installments/installment.entity';
+import { User } from '../users/user.entity';
 
 export type PaymentComposition = {
   hasAdvance: boolean;
@@ -23,13 +24,12 @@ export class Sale {
   @PrimaryGeneratedColumn()
   id: number;
 
-  // 🧍 Cliente
-@Column({ type: 'varchar', length: 32, nullable: true })
-clientDni: string;
+  // 🧍 Cliente (datos denormalizados para reportes/listados)
+  @Column({ type: 'varchar', length: 32, nullable: true })
+  clientDni: string | null;
 
-@Column({ type: 'varchar', length: 160, nullable: true })
-clientName: string;
-
+  @Column({ type: 'varchar', length: 160, nullable: true })
+  clientName: string | null;
 
   @ManyToOne(() => Client, (client) => client.sales, {
     onDelete: 'SET NULL',
@@ -37,7 +37,7 @@ clientName: string;
     nullable: true,
   })
   @JoinColumn({ name: 'clientId' })
-  client: Client;
+  client: Client | null;
 
   // 🚗 Vehículo
   @Column()
@@ -106,6 +106,21 @@ clientName: string;
 
   @Column({ length: 7 })
   initialPaymentMonth: string; // "2025-12"
+
+  // 🧑‍💼 Vendedor (usuario que registra la venta)
+  @ManyToOne(() => User, {
+    eager: false,
+    nullable: true,
+    onDelete: 'SET NULL',
+  })
+  @JoinColumn({ name: 'sellerId' })
+  seller: User | null;
+
+  @Column({ type: 'int', nullable: true })
+  sellerId: number | null;
+
+  @Column({ type: 'varchar', length: 160, nullable: true })
+  sellerName: string | null;
 
   // ⚙️ Composición del pago (flags)
   @Column('simple-json', { nullable: true })

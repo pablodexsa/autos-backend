@@ -5,13 +5,15 @@ import { BudgetsController } from './budgets.controller';
 import { Budget } from './budget.entity';
 import { Vehicle } from '../vehicles/vehicle.entity';
 import { Client } from '../clients/entities/client.entity';
-import { BudgetReportsModule } from '../budget-reports/budget-reports.module'; // 👈 agregado
-import { LoanRate } from '../loan-rates/loan-rate.entity'; // ✅ Importa la entidad
+import { BudgetReportsModule } from '../budget-reports/budget-reports.module';
+import { LoanRate } from '../loan-rates/loan-rate.entity';
+import { AuditModule } from '../audit/audit.module'; // 👈 NUEVO
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Budget, Vehicle, Client, LoanRate]),
-    BudgetReportsModule, // 👈 agregado
+    BudgetReportsModule,
+    AuditModule, // 👈 SE AGREGA AQUÍ
   ],
   controllers: [BudgetsController],
   providers: [BudgetsService],

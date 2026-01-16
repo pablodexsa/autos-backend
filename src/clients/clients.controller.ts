@@ -19,20 +19,21 @@ export class ClientsController {
   constructor(private readonly clientsService: ClientsService) {}
 
   // ✅ Crear nuevo cliente
-@Post()
-async create(@Body() data: CreateClientDto) {
-  console.log('📩 Datos recibidos en el backend:', data); // 👈 Agregalo acá
-  try {
-    if (!data.firstName || !data.lastName || !data.dni) {
-      throw new BadRequestException('Nombre, apellido y DNI son obligatorios.');
+  @Post()
+  async create(@Body() data: CreateClientDto) {
+    console.log('📩 Datos recibidos en el backend:', data);
+    try {
+      if (!data.firstName || !data.lastName || !data.dni) {
+        throw new BadRequestException(
+          'Nombre, apellido y DNI son obligatorios.',
+        );
+      }
+      return await this.clientsService.create(data);
+    } catch (error) {
+      if ((error as any).response?.message) throw error; // errores del servicio (409, 400, etc.)
+      throw new BadRequestException('Error al crear el cliente.');
     }
-    return await this.clientsService.create(data);
-  } catch (error) {
-    if (error.response?.message) throw error; // errores del servicio (409, 400, etc.)
-    throw new BadRequestException('Error al crear el cliente.');
   }
-}
-
 
   // ✅ Listar todos los clientes
   @Get()
@@ -65,7 +66,7 @@ async create(@Body() data: CreateClientDto) {
     try {
       return await this.clientsService.update(id, data);
     } catch (error) {
-      if (error.response?.message) throw error;
+      if ((error as any).response?.message) throw error;
       throw new BadRequestException('Error al actualizar el cliente.');
     }
   }
@@ -76,7 +77,7 @@ async create(@Body() data: CreateClientDto) {
     try {
       return await this.clientsService.remove(id);
     } catch (error) {
-      if (error.response?.message) throw error;
+      if ((error as any).response?.message) throw error;
       throw new BadRequestException('Error al eliminar el cliente.');
     }
   }
