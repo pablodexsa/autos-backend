@@ -10,6 +10,7 @@
   ParseIntPipe,
   Delete,
   NotFoundException,
+  UseGuards,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
@@ -18,24 +19,32 @@ import * as path from 'path';
 import * as fs from 'fs';
 import PDFDocument from 'pdfkit';
 import { InstallmentPaymentService } from './installment-payment.service';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @Controller('installment-payments')
 export class InstallmentPaymentController {
   constructor(private readonly paymentService: InstallmentPaymentService) {}
 
+  // ======================================================
+  // 🔐 RUTAS PROTEGIDAS (AUDITORÍA CON USUARIO)
+  // ======================================================
+
   // 📋 Listar todos los pagos
+  @UseGuards(JwtAuthGuard)
   @Get()
   findAll() {
     return this.paymentService.findAll();
   }
 
   // 🧾 Ver detalle de un pago
+  @UseGuards(JwtAuthGuard)
   @Get(':id')
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.paymentService.findOne(id);
   }
 
   // 💾 Registrar un nuevo pago
+  @UseGuards(JwtAuthGuard)
   @Post()
   @UseInterceptors(
     FileInterceptor('file', {
@@ -64,10 +73,15 @@ export class InstallmentPaymentController {
   }
 
   // ❌ Eliminar pago (aunque no lo uses en el front, lo dejamos)
+  @UseGuards(JwtAuthGuard)
   @Delete(':id')
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.paymentService.remove(id);
   }
+
+  // ======================================================
+  // 🌐 RUTAS PÚBLICAS (SIN JWT – EVITA 401 AL ABRIR PDFs/ARCHIVOS)
+  // ======================================================
 
   // 🖨️ Generar y descargar comprobante PDF del sistema
   @Get(':id/receipt')
@@ -174,12 +188,10 @@ export class InstallmentPaymentController {
       } else if (inst.sale?.installments?.length) {
         const ordered = [...inst.sale.installments].sort(
           (a: any, b: any) =>
-            new Date(a.dueDate).getTime() -
-            new Date(b.dueDate).getTime(),
+            new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime(),
         );
         const idx = ordered.findIndex((x: any) => x.id === inst.id);
-        cuotaLabel =
-          idx >= 0 ? `${idx + 1}/${ordered.length}` : `#${inst.id}`;
+        cuotaLabel = idx >= 0 ? `${idx + 1}/${ordered.length}` : `#${inst.id}`;
       } else {
         cuotaLabel = `#${inst.id}`;
       }
@@ -215,8 +227,7 @@ export class InstallmentPaymentController {
       const factor = 1 + 0.01 * daysLate;
 
       // Saldo actualizado a hoy (después de este pago)
-      const currentAfter =
-        factor > 1 ? basePrincipal * factor : basePrincipal;
+      const currentAfter = factor > 1 ? basePrincipal * factor : basePrincipal;
       saldoActual = +currentAfter.toFixed(2);
 
       // Monto de la cuota al día de pago (antes del pago)
@@ -231,9 +242,7 @@ export class InstallmentPaymentController {
       );
 
       if (saldoActual != null && saldoActual > 0.009) {
-        doc.text(
-          `Saldo pendiente actualizado: ${pesos(saldoActual)}`,
-        );
+        doc.text(`Saldo pendiente actualizado: ${pesos(saldoActual)}`);
       } else {
         doc.text('Saldo pendiente actualizado: $ 0,00');
       }
@@ -291,7 +300,9 @@ export class InstallmentPaymentController {
     const filePath = path.join(process.cwd(), payment.receiptPath);
 
     if (!fs.existsSync(filePath)) {
-      throw new NotFoundException('Archivo adjunto no encontrado en el servidor.');
+      throw new NotFoundException(
+        'Archivo adjunto no encontrado en el servidor.',
+      );
     }
 
     return res.sendFile(filePath);

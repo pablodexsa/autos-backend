@@ -65,7 +65,8 @@ export class BudgetsService {
     if (!client) throw new BadRequestException('Cliente no encontrado');
 
     // 🔄 Normalizar montos provenientes del frontend (soporta nombres antiguos y nuevos)
-    const downPayment =
+    // ⬇️ lo pasamos a let para poder ajustarlo en el caso especial
+    let downPayment =
       dto.downPayment != null ? Number(dto.downPayment) : 0;
 
     const hasTradeIn =
@@ -73,8 +74,6 @@ export class BudgetsService {
     const tradeInValue =
       hasTradeIn && dto.tradeInValue != null ? Number(dto.tradeInValue) : 0;
 
-    // Soporta tanto los campos viejos (prendarioAmount, personalAmount, financiacionAmount)
-    // como los nuevos (montoPrendario, montoPersonal, montoFinanciacion)
     const prendarioAmount =
       dto.prendarioAmount != null
         ? Number(dto.prendarioAmount)
@@ -101,9 +100,40 @@ export class BudgetsService {
     dto.personalAmount = personalAmount || null;
     dto.financiacionAmount = financiacionAmount || null;
 
+    const vehiclePrice = Number(vehicle.price) || 0;
+
+    // ⭐ Caso especial: PERMUTA + CONTADO sin financiación
+    // Front muestra saldo pero puede no mandarlo como downPayment.
+    // Antes dependía de paymentType === 'CASH'; ahora solo de la composición real.
+    if (
+      hasTradeIn &&
+      downPayment === 0 &&
+      prendarioAmount === 0 &&
+      personalAmount === 0 &&
+      financiacionAmount === 0
+    ) {
+      const saldoEsperado = vehiclePrice - tradeInValue;
+
+      if (saldoEsperado < 0) {
+        throw new BadRequestException(
+          'El valor de la permuta no puede ser mayor al precio del vehículo.',
+        );
+      }
+
+      // Si hay saldo a pagar, lo seteamos como anticipo
+      if (Math.abs(saldoEsperado) > 1) {
+        downPayment = saldoEsperado;
+        dto.downPayment = saldoEsperado;
+
+        console.log(
+          '💡 Ajuste automático de anticipo para PERMUTA + CONTADO:',
+          { vehiclePrice, tradeInValue, downPayment },
+        );
+      }
+    }
+
     // ✅ Regla de negocio: la suma de anticipo + permuta + financiaciones
     // debe coincidir con el precio del vehículo
-    const vehiclePrice = Number(vehicle.price) || 0;
     const totalComposition =
       downPayment +
       tradeInValue +
@@ -121,6 +151,15 @@ export class BudgetsService {
     if (someAmountEntered) {
       const diff = Math.abs(totalComposition - vehiclePrice);
       if (diff > 1) {
+        console.error('❌ Composición inválida en presupuesto', {
+          vehiclePrice,
+          downPayment,
+          tradeInValue,
+          prendarioAmount,
+          personalAmount,
+          financiacionAmount,
+          totalComposition,
+        });
         throw new BadRequestException(
           'La suma de anticipo, permuta y financiaciones debe coincidir con el precio del vehículo. Revise los importes.',
         );
@@ -131,9 +170,6 @@ export class BudgetsService {
     const installmentsCount: number = Number(dto.installments) || 0;
 
     // Mapeo de tramos para tasas:
-    //  1-12  => usa la tasa configurada para 12 meses
-    // 13-24  => usa la tasa configurada para 24 meses
-    // 25-36  => usa la tasa configurada para 36 meses
     const bracketMonths =
       installmentsCount <= 0
         ? null
@@ -401,8 +437,6 @@ export class BudgetsService {
     if (hasLoans) {
       sectionTitle('Detalle de Préstamos y Financiaciones');
 
-      // Los montos guardados en presupuesto son NETOS (sin interés).
-      // Acá calculamos el monto financiado y la cuota con interés para mostrar.
       const calcConInteres = (montoNeto?: number | null, tasa?: number | null) => {
         if (!montoNeto) return 0;
         if (!tasa) return montoNeto;

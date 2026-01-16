@@ -6,12 +6,15 @@
   Delete,
   ParseIntPipe,
   Body,
+  UseGuards,
 } from '@nestjs/common';
 import { InstallmentsService } from './installments.service';
 import { ApiTags } from '@nestjs/swagger';
 import { ApplyInstallmentPaymentDto } from './dto/apply-installment-payment.dto';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @ApiTags('Installments')
+@UseGuards(JwtAuthGuard) // 👈 necesario para que Auditoría registre el usuario
 @Controller('installments')
 export class InstallmentsController {
   constructor(private readonly installmentsService: InstallmentsService) {}

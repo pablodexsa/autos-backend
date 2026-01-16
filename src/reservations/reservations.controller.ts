@@ -11,6 +11,7 @@
   Res,
   HttpException,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { ReservationsService } from './reservations.service';
 import { AnyFilesInterceptor } from '@nestjs/platform-express';
@@ -18,27 +19,31 @@ import type { Response } from 'express';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import * as fs from 'fs';
 import * as path from 'path';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @ApiTags('Reservations')
 @Controller('reservations')
 export class ReservationsController {
   constructor(private readonly reservationsService: ReservationsService) {}
 
-  // 🔹 Listado completo
+  // 🔹 Listado completo (protegido)
+  @UseGuards(JwtAuthGuard)
   @Get()
   @ApiOperation({ summary: 'Listar todas las reservas' })
   async findAll() {
     return this.reservationsService.findAll();
   }
 
-  // 🔹 Obtener una reserva por ID
+  // 🔹 Obtener una reserva por ID (protegido)
+  @UseGuards(JwtAuthGuard)
   @Get(':id')
   @ApiOperation({ summary: 'Obtener una reserva por ID' })
   async findOne(@Param('id', ParseIntPipe) id: number) {
     return this.reservationsService.findOne(id);
   }
 
-  // 🔹 Crear una nueva reserva (PDF con nomenclatura real, sin alertas)
+  // 🔹 Crear una nueva reserva (protegido)
+  @UseGuards(JwtAuthGuard)
   @Post()
   @ApiOperation({ summary: 'Crear una nueva reserva y generar PDF' })
   async create(@Body() dto: any, @Res() res: Response) {
@@ -65,8 +70,6 @@ export class ReservationsController {
         fs.writeFileSync(filePath, buffer);
       }
 
-      console.log(`✅ Reserva creada y PDF guardado como ${fileName}`);
-
       res.status(201).json({
         id: created.id,
         pdfName: fileName,
@@ -81,7 +84,8 @@ export class ReservationsController {
     }
   }
 
-  // 🔹 Actualizar reserva existente
+  // 🔹 Actualizar reserva existente (protegido)
+  @UseGuards(JwtAuthGuard)
   @Patch(':id')
   @ApiOperation({ summary: 'Actualizar una reserva existente' })
   async update(@Param('id', ParseIntPipe) id: number, @Body() dto: any) {
@@ -96,7 +100,8 @@ export class ReservationsController {
     }
   }
 
-  // 🔹 Agregar garante con archivos adjuntos
+  // 🔹 Agregar garante con archivos adjuntos (protegido)
+  @UseGuards(JwtAuthGuard)
   @Post(':id/guarantors')
   @UseInterceptors(AnyFilesInterceptor())
   @ApiOperation({
@@ -123,7 +128,7 @@ export class ReservationsController {
     }
   }
 
-  // 🔹 Descargar PDF de reserva con nombre correcto
+  // 🔹 Descargar PDF de reserva (SIN GUARD)
   @Get(':id/pdf')
   @ApiOperation({
     summary: 'Descargar comprobante de reserva en PDF con nombre real',
@@ -145,8 +150,6 @@ export class ReservationsController {
         if (pdfs.length > 0) fileName = pdfs[0];
       }
 
-      console.log(`📤 Enviando archivo real: ${fileName}`);
-
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader(
         'Content-Disposition',
@@ -163,7 +166,8 @@ export class ReservationsController {
     }
   }
 
-  // 🔹 NUEVO ENDPOINT: Forzar expiración manual de reservas
+  // 🔹 Forzar expiración manual (protegido)
+  @UseGuards(JwtAuthGuard)
   @Post('expire')
   @ApiOperation({
     summary: 'Marcar manualmente las reservas vencidas y liberar vehículos',

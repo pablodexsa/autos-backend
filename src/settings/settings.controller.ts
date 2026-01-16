@@ -4,9 +4,12 @@
   Patch,
   Body,
   BadRequestException,
+  UseGuards,
 } from '@nestjs/common';
 import { SettingsService } from './settings.service';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
+@UseGuards(JwtAuthGuard) // 👈 necesario para que Auditoría registre el usuario
 @Controller('settings')
 export class SettingsController {
   private readonly RESERVATION_AMOUNT_KEY = 'reservation.amount';
@@ -55,7 +58,9 @@ export class SettingsController {
   async setPersonalMax(@Body() body: { maxPersonalAmount: number }) {
     const v = Number(body.maxPersonalAmount);
     if (!Number.isFinite(v) || v <= 0) {
-      throw new BadRequestException('Monto máximo de financiación inválido');
+      throw new BadRequestException(
+        'Monto máximo de financiación inválido',
+      );
     }
 
     await this.settings.set(this.PERSONAL_MAX_KEY, String(v));

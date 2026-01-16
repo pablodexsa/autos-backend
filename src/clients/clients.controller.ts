@@ -9,11 +9,14 @@
   Query,
   NotFoundException,
   BadRequestException,
+  UseGuards,
 } from '@nestjs/common';
 import { ClientsService } from './clients.service';
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
+@UseGuards(JwtAuthGuard) // 👈 NECESARIO para que Auditoría tenga usuario
 @Controller('clients')
 export class ClientsController {
   constructor(private readonly clientsService: ClientsService) {}
@@ -30,7 +33,7 @@ export class ClientsController {
       }
       return await this.clientsService.create(data);
     } catch (error) {
-      if ((error as any).response?.message) throw error; // errores del servicio (409, 400, etc.)
+      if ((error as any).response?.message) throw error;
       throw new BadRequestException('Error al crear el cliente.');
     }
   }
@@ -41,7 +44,7 @@ export class ClientsController {
     return this.clientsService.findAll();
   }
 
-  // ✅ Buscar cliente por DNI (autocompletado o búsqueda rápida)
+  // ✅ Buscar cliente por DNI (autocompletado / búsqueda rápida)
   @Get('search/by-dni')
   async searchByDni(@Query('dni') dni: string) {
     if (!dni || dni.trim() === '') {
