@@ -17,12 +17,22 @@ export class VehiclesService {
     @InjectRepository(Version) private versionRepo: Repository<Version>,
   ) {}
 
-  private updates$ = new Subject<{ type: 'created' | 'updated' | 'deleted'; id?: number }>();
-  getUpdatesStream() { return this.updates$.asObservable(); }
-  private notify(type: 'created' | 'updated' | 'deleted', id?: number) { this.updates$.next({ type, id }); }
+  private updates$ = new Subject<{
+    type: 'created' | 'updated' | 'deleted';
+    id?: number;
+  }>();
+  getUpdatesStream() {
+    return this.updates$.asObservable();
+  }
+  private notify(type: 'created' | 'updated' | 'deleted', id?: number) {
+    this.updates$.next({ type, id });
+  }
 
   async create(dto: CreateVehicleDto) {
-    const version = await this.versionRepo.findOne({ where: { id: dto.versionId }, relations: ['model', 'model.brand'] });
+    const version = await this.versionRepo.findOne({
+      where: { id: dto.versionId },
+      relations: ['model', 'model.brand'],
+    });
     if (!version) throw new NotFoundException('Version not found');
 
     const v = this.repo.create({
@@ -31,6 +41,12 @@ export class VehiclesService {
       model: version.model.name,
       versionName: version.name,
       year: dto.year,
+
+      // ✅ NUEVOS CAMPOS
+      kilometraje: dto.kilometraje ?? null,
+      concesionaria: dto.concesionaria ?? null,
+      procedencia: dto.procedencia ?? null,
+
       plate: dto.plate,
       engineNumber: dto.engineNumber,
       chassisNumber: dto.chassisNumber,
@@ -38,6 +54,7 @@ export class VehiclesService {
       price: dto.price,
       status: dto.status,
     });
+
     const saved = await this.repo.save(v);
     this.notify('created', saved.id);
     return saved;
@@ -45,12 +62,29 @@ export class VehiclesService {
 
   async findAll(q: QueryVehicleDto) {
     const {
-      brandId, modelId, versionId, color, status, plate, q: text,
-      yearMin, yearMax, priceMin, priceMax,
-      page = 1, limit = 10, sortBy = 'createdAt', sortOrder = 'DESC',
+      brandId,
+      modelId,
+      versionId,
+      color,
+      status,
+      plate,
+      q: text,
+      yearMin,
+      yearMax,
+      priceMin,
+      priceMax,
+
+      // ✅ NUEVO FILTRO
+      concesionaria,
+
+      page = 1,
+      limit = 10,
+      sortBy = 'createdAt',
+      sortOrder = 'DESC',
     } = q;
 
-    const qb = this.repo.createQueryBuilder('v')
+    const qb = this.repo
+      .createQueryBuilder('v')
       .leftJoinAndSelect('v.version', 'ver')
       .leftJoinAndSelect('ver.model', 'm')
       .leftJoinAndSelect('m.brand', 'b');
@@ -61,13 +95,25 @@ export class VehiclesService {
     if (versionId) qb.andWhere('ver.id = :versionId', { versionId });
 
     // 🔹 Filtros básicos
-    if (color) qb.andWhere('LOWER(v.color) LIKE :color', { color: `%${color.toLowerCase()}%` });
-    if (plate) qb.andWhere('LOWER(v.plate) LIKE :plate', { plate: `%${plate.toLowerCase()}%` });
+    if (color)
+      qb.andWhere('LOWER(v.color) LIKE :color', {
+        color: `%${color.toLowerCase()}%`,
+      });
+    if (plate)
+      qb.andWhere('LOWER(v.plate) LIKE :plate', {
+        plate: `%${plate.toLowerCase()}%`,
+      });
 
     if (yearMin) qb.andWhere('v.year >= :yearMin', { yearMin });
     if (yearMax) qb.andWhere('v.year <= :yearMax', { yearMax });
     if (priceMin) qb.andWhere('v.price >= :priceMin', { priceMin });
     if (priceMax) qb.andWhere('v.price <= :priceMax', { priceMax });
+
+    // ✅ NUEVO: filtro por Procedencia
+if (concesionaria) {
+  qb.andWhere('v.concesionaria = :concesionaria', { concesionaria });
+}
+
 
     if (text) {
       qb.andWhere(
@@ -80,11 +126,13 @@ export class VehiclesService {
     if (status) {
       qb.andWhere('LOWER(v.status) = LOWER(:status)', { status });
     } else {
-      qb.andWhere('(v.sold = false OR LOWER(v.status) = :available)', { available: 'available' });
+      qb.andWhere('(v.sold = false OR LOWER(v.status) = :available)', {
+        available: 'available',
+      });
     }
 
     // 🔹 Orden y paginación
-    qb.orderBy(`v.${sortBy}`, sortOrder)
+    qb.orderBy(`v.${sortBy}`, sortOrder as any)
       .skip((page - 1) * limit)
       .take(limit);
 
@@ -117,6 +165,13 @@ export class VehiclesService {
     }
 
     if (dto.year !== undefined) v.year = dto.year;
+
+    // ✅ NUEVOS CAMPOS
+    if (dto.kilometraje !== undefined) v.kilometraje = dto.kilometraje ?? null;
+    if (dto.concesionaria !== undefined)
+      v.concesionaria = dto.concesionaria ?? null;
+    if (dto.procedencia !== undefined) v.procedencia = dto.procedencia ?? null;
+
     if (dto.plate !== undefined) v.plate = dto.plate;
     if (dto.engineNumber !== undefined) v.engineNumber = dto.engineNumber;
     if (dto.chassisNumber !== undefined) v.chassisNumber = dto.chassisNumber;
@@ -154,7 +209,9 @@ export class VehiclesService {
   ): Promise<{ absPath: string; filename: string }> {
     const vehicle = await this.repo.findOne({ where: { id } });
     if (!vehicle || !vehicle.documentationPath) {
-      throw new NotFoundException('Documentación no encontrada para este vehículo');
+      throw new NotFoundException(
+        'Documentación no encontrada para este vehículo',
+      );
     }
 
     // La documentationPath es relativa a /uploads (por ejemplo: "vehicle-docs/archivo.pdf")
@@ -162,7 +219,9 @@ export class VehiclesService {
     const filename = path.basename(absPath);
 
     if (!fs.existsSync(absPath)) {
-      throw new NotFoundException('Archivo de documentación no encontrado en el servidor');
+      throw new NotFoundException(
+        'Archivo de documentación no encontrado en el servidor',
+      );
     }
 
     return { absPath, filename };

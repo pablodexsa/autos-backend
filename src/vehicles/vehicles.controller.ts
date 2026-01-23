@@ -7,7 +7,6 @@
   Param,
   Delete,
   Query,
-  DefaultValuePipe,
   ParseIntPipe,
   UploadedFile,
   UseInterceptors,
@@ -27,9 +26,9 @@ import { VehiclesService } from './vehicles.service';
 import { CreateVehicleDto } from './dto/create-vehicle.dto';
 import { UpdateVehicleDto } from './dto/update-vehicle.dto';
 import { QueryVehicleDto } from './dto/query-vehicle.dto';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'; // 👈 IMPORTANTE
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
-@UseGuards(JwtAuthGuard) // 👈 exige usuario logueado
+@UseGuards(JwtAuthGuard)
 @Controller('vehicles')
 export class VehiclesController {
   constructor(private readonly vehiclesService: VehiclesService) {}
@@ -99,30 +98,12 @@ export class VehiclesController {
     return this.vehiclesService.create(dto);
   }
 
-  // ✅ Listado con paginación segura
+  // ✅ Listado: usar DTO completo (brandId/modelId/versionId/concesionaria/etc)
   @Get()
-  findAll(
-    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
-    @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
-    @Query('q') q?: string,
-    @Query('brand') brand?: string,
-    @Query('model') model?: string,
-    @Query('version') version?: string,
-    @Query('status') status?: string,
-    @Query('color') color?: string,
-    @Query('plate') plate?: string,
-  ) {
-    return this.vehiclesService.findAll({
-      page,
-      limit,
-      q,
-      brand,
-      model,
-      version,
-      status,
-      color,
-      plate,
-    } as any as QueryVehicleDto);
+  findAll(@Query() q: QueryVehicleDto) {
+    q.page = q.page && Number(q.page) > 0 ? Number(q.page) : 1;
+    q.limit = q.limit && Number(q.limit) > 0 ? Number(q.limit) : 10;
+    return this.vehiclesService.findAll(q);
   }
 
   @Get(':id')

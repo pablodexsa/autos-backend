@@ -18,7 +18,9 @@ export class Vehicle {
   @PrimaryGeneratedColumn()
   id: number;
 
-  // Denormalized for quick filters
+  // =========================
+  // Denormalized (filtros rápidos)
+  // =========================
   @Column({ length: 100 })
   brand: string;
 
@@ -28,11 +30,22 @@ export class Vehicle {
   @Column({ length: 150 })
   versionName: string;
 
-  @ManyToOne(() => Version, { eager: false, onDelete: 'RESTRICT', nullable: false })
+  @ManyToOne(() => Version, {
+    eager: false,
+    onDelete: 'RESTRICT',
+    nullable: false,
+  })
   version: Version;
 
+  // =========================
+  // Datos del vehículo
+  // =========================
   @Column('int')
   year: number;
+
+  // ✅ NUEVO: Kilometraje (después de año)
+  @Column({ type: 'int', nullable: true })
+  kilometraje: number | null;
 
   @Column({ length: 20, unique: true })
   plate: string;
@@ -43,13 +56,29 @@ export class Vehicle {
   @Column({ length: 100 })
   chassisNumber: string;
 
+  // ✅ NUEVO: Concesionaria (después de N° chasis)
+  @Column({ type: 'varchar', length: 10, nullable: true })
+  concesionaria: 'DG' | 'SyS' | null;
+
+  // ✅ NUEVO: Procedencia (después de Concesionaria)
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  procedencia:
+    | 'Randazzo'
+    | 'Radatti'
+    | 'Consignados'
+    | 'Propios'
+    | null;
+
   @Column({ length: 40 })
   color: string;
 
   @Column('decimal', {
     precision: 12,
     scale: 2,
-    transformer: { to: (v?: number) => v, from: (v: string) => Number(v) },
+    transformer: {
+      to: (v?: number) => v,
+      from: (v: string) => Number(v),
+    },
   })
   price: number;
 
@@ -59,17 +88,28 @@ export class Vehicle {
   @Column({ default: false })
   sold: boolean; // ✅ para filtros en budgets.service
 
-  // 📁 Ruta relativa del archivo de documentación del vehículo (PDF, imágenes, etc.)
-  @Column({ name: 'documentation_path', type: 'text', nullable: true })
+  // =========================
+  // Documentación
+  // =========================
+  @Column({
+    name: 'documentation_path',
+    type: 'text',
+    nullable: true,
+  })
   documentationPath: string | null;
 
+  // =========================
+  // Auditoría
+  // =========================
   @CreateDateColumn()
   createdAt: Date;
 
   @UpdateDateColumn()
   updatedAt: Date;
 
-  // ✅ Relaciones agregadas para resolver errores
+  // =========================
+  // Relaciones
+  // =========================
   @OneToMany(() => Purchase, (purchase) => purchase.vehicle)
   purchases: Purchase[];
 
