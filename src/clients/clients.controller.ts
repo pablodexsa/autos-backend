@@ -10,11 +10,20 @@
   NotFoundException,
   BadRequestException,
   UseGuards,
+  ParseIntPipe,
+  UploadedFile,
+  UseInterceptors,
+  Res,
 } from '@nestjs/common';
 import { ClientsService } from './clients.service';
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import * as path from 'path';
+import * as express from 'express';
 
 @UseGuards(JwtAuthGuard) // 👈 NECESARIO para que Auditoría tenga usuario
 @Controller('clients')
@@ -53,9 +62,51 @@ export class ClientsController {
     return this.clientsService.searchByDni(dni);
   }
 
+  // ============================
+  // 📄 SUBIR DNI CLIENTE
+  // ============================
+  @Post(':id/dni')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: diskStorage({
+        destination: path.join(process.cwd(), 'uploads', 'client-dni'),
+        filename: (req, file, cb) => {
+          const ext = path.extname(file.originalname);
+          const base = path.basename(file.originalname, ext);
+          const safeBase = base.replace(/[^a-zA-Z0-9-_]/g, '_');
+          const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+          cb(null, `${safeBase}-${unique}${ext}`);
+        },
+      }),
+    }),
+  )
+  async uploadDni(
+    @Param('id', ParseIntPipe) id: number,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new NotFoundException('No se adjuntó ningún archivo');
+    }
+    const relativePath = path.join('client-dni', file.filename);
+    const updated = await this.clientsService.attachDni(id, relativePath);
+    return { ok: true, dniPath: updated.dniPath };
+  }
+
+  // ============================
+  // 📄 DESCARGAR DNI CLIENTE
+  // ============================
+  @Get(':id/dni')
+  async downloadDni(
+    @Param('id', ParseIntPipe) id: number,
+    @Res() res: express.Response,
+  ) {
+    const { absPath, filename } = await this.clientsService.getDniPath(id);
+    return res.download(absPath, filename);
+  }
+
   // ✅ Obtener cliente por ID
   @Get(':id')
-  async findOne(@Param('id') id: number) {
+  async findOne(@Param('id', ParseIntPipe) id: number) {
     const client = await this.clientsService.findOne(id);
     if (!client) {
       throw new NotFoundException(`Cliente con ID ${id} no encontrado.`);
@@ -65,7 +116,10 @@ export class ClientsController {
 
   // ✅ Actualizar cliente
   @Put(':id')
-  async update(@Param('id') id: number, @Body() data: UpdateClientDto) {
+  async update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() data: UpdateClientDto,
+  ) {
     try {
       return await this.clientsService.update(id, data);
     } catch (error) {
@@ -76,7 +130,7 @@ export class ClientsController {
 
   // ✅ Eliminar cliente
   @Delete(':id')
-  async remove(@Param('id') id: number) {
+  async remove(@Param('id', ParseIntPipe) id: number) {
     try {
       return await this.clientsService.remove(id);
     } catch (error) {

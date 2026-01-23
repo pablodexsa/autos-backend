@@ -9,6 +9,8 @@ import { Repository, Like } from 'typeorm';
 import { Client } from './entities/client.entity';
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
+import * as path from 'path';
+import * as fs from 'fs';
 
 @Injectable()
 export class ClientsService {
@@ -41,6 +43,9 @@ export class ClientsService {
       address: data.address,
       phone: data.phone,
       email: data.email,
+
+      // 📄 DNI adjunto (se sube por endpoint separado)
+      dniPath: null,
     });
 
     return this.clientsRepository.save(client);
@@ -88,5 +93,38 @@ export class ClientsService {
       take: 5,
       order: { dni: 'ASC' },
     });
+  }
+
+  // ============================
+  // 📄 DNI ADJUNTO
+  // ============================
+
+  // 📄 Asociar DNI al cliente (ruta relativa dentro de /uploads)
+  async attachDni(id: number, relativePath: string): Promise<Client> {
+    const client = await this.clientsRepository.findOne({ where: { id } });
+    if (!client) {
+      throw new NotFoundException(`Client ${id} not found`);
+    }
+
+    client.dniPath = relativePath;
+    return this.clientsRepository.save(client);
+  }
+
+  // 📄 Obtener ruta absoluta + nombre de archivo del DNI adjunto
+  async getDniPath(id: number): Promise<{ absPath: string; filename: string }> {
+    const client = await this.clientsRepository.findOne({ where: { id } });
+    if (!client || !client.dniPath) {
+      throw new NotFoundException('DNI no encontrado para este cliente');
+    }
+
+    // dniPath es relativa a /uploads (ej: "client-dni/archivo.pdf")
+    const absPath = path.join(process.cwd(), 'uploads', client.dniPath);
+    const filename = path.basename(absPath);
+
+    if (!fs.existsSync(absPath)) {
+      throw new NotFoundException('Archivo DNI no encontrado en el servidor');
+    }
+
+    return { absPath, filename };
   }
 }

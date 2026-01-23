@@ -1,4 +1,4 @@
-import {
+﻿import {
   Entity,
   PrimaryGeneratedColumn,
   Column,
@@ -30,6 +30,10 @@ export class Client {
 
   @Column({ length: 200, nullable: true })
   address: string;
+
+  // 📄 Ruta relativa del DNI adjunto (PDF/imagen/etc) dentro de /uploads
+  @Column({ name: 'dni_path', type: 'text', nullable: true })
+  dniPath: string | null;
 
   @OneToMany(() => Sale, (sale) => sale.client)
   sales: Sale[];
