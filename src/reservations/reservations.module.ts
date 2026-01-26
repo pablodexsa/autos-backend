@@ -10,10 +10,11 @@ import { User } from '../users/user.entity';
 import { ReservationsTasks } from './reservations.tasks';
 import { SettingsModule } from '../settings/settings.module';
 import { AuditModule } from '../audit/audit.module'; // 👈 NUEVO
+import { Refund } from '../refunds/refund.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Reservation, Guarantor, Vehicle, Client, User]),
+    TypeOrmModule.forFeature([Reservation, Guarantor, Vehicle, Client, User, Refund,]),
     SettingsModule, // para poder inyectar SettingsService en ReservationsService
     AuditModule,     // 👈 SE AGREGA AQUÍ
   ],

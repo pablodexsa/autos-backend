@@ -10,6 +10,9 @@ import { ReservationsModule } from './reservations/reservations.module';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AuditInterceptor } from './audit/audit.interceptor';
 
+// ✅ NUEVO
+import { RefundsModule } from './refunds/refunds.module';
+
 // 📦 Módulos internos
 import { UsersModule } from './users/users.module';
 import { RolesModule } from './roles/roles.module';
@@ -30,7 +33,6 @@ import { LoanRatesModule } from './loan-rates/loan-rates.module';
 import { AuditModule } from './audit/audit.module';
 import { SettingsModule } from './settings/settings.module';
 import { Setting } from './settings/setting.entity';
-
 
 // 📦 Entidades
 import { User } from './users/user.entity';
@@ -104,6 +106,9 @@ import { Version } from './versions/version.entity';
     LoanRatesModule,
     AuditModule,
     SettingsModule,
+
+    // ✅ NUEVO: expone /refunds
+    RefundsModule,
   ],
   controllers: [AppController],
   providers: [

@@ -1,44 +1,69 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-
-export interface Role {
-  id: number;
-  name: string;
-}
+﻿import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Role } from './role.entity';
 
 @Injectable()
 export class RolesService {
-  private roles: Role[] = [
-    { id: 1, name: 'admin' },
-    { id: 2, name: 'vendedor' },
-    { id: 3, name: 'gerencia' },
-  ];
+  constructor(
+    @InjectRepository(Role)
+    private readonly rolesRepo: Repository<Role>,
+  ) {}
 
-  findAll() {
-    return this.roles;
+  async findAll(): Promise<Role[]> {
+    return this.rolesRepo.find({ order: { id: 'ASC' } });
   }
 
-  findOne(id: number) {
-    const role = this.roles.find(r => r.id === id);
+  async findOne(id: number): Promise<Role> {
+    const role = await this.rolesRepo.findOne({ where: { id } });
     if (!role) throw new NotFoundException('Rol no encontrado');
     return role;
   }
 
-  create(name: string) {
-    const newRole = { id: this.roles.length + 1, name };
-    this.roles.push(newRole);
-    return newRole;
+  async create(name: string, description?: string): Promise<Role> {
+    const normalized = String(name ?? '').trim().toLowerCase();
+    if (!normalized) throw new BadRequestException('Nombre de rol inválido');
+
+    const exists = await this.rolesRepo.findOne({ where: { name: normalized } });
+    if (exists) throw new BadRequestException('El rol ya existe');
+
+    const role = this.rolesRepo.create({
+      name: normalized,
+      // ✅ tu entity tiene description: string (no nullable) → nunca mandamos null
+      description: (description ?? '').trim(),
+    });
+
+    return this.rolesRepo.save(role);
   }
 
-  update(id: number, name: string) {
-    const role = this.findOne(id);
-    role.name = name;
-    return role;
+  async update(id: number, name: string, description?: string): Promise<Role> {
+    const role = await this.findOne(id);
+
+    const normalized = String(name ?? '').trim().toLowerCase();
+    if (!normalized) throw new BadRequestException('Nombre de rol inválido');
+
+    if (role.name !== normalized) {
+      const exists = await this.rolesRepo.findOne({ where: { name: normalized } });
+      if (exists) throw new BadRequestException('Ya existe un rol con ese nombre');
+    }
+
+    role.name = normalized;
+
+    // si viene description, lo actualizamos
+    if (description !== undefined) {
+      role.description = String(description ?? '').trim();
+    }
+
+    return this.rolesRepo.save(role);
   }
 
-  remove(id: number) {
-    const index = this.roles.findIndex(r => r.id === id);
-    if (index === -1) throw new NotFoundException('Rol no encontrado');
-    this.roles.splice(index, 1);
+  async remove(id: number): Promise<{ deleted: true }> {
+    const role = await this.findOne(id);
+    await this.rolesRepo.remove(role);
     return { deleted: true };
   }
 }

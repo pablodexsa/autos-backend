@@ -1,6 +1,6 @@
 ﻿import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { Reservation } from './reservation.entity';
 import { Guarantor } from './guarantor.entity';
 import { Vehicle } from '../vehicles/vehicle.entity';
@@ -10,6 +10,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import PDFDocument from 'pdfkit';
 import { SettingsService } from '../settings/settings.service';
+
+// ✅ NUEVO (módulo Devoluciones)
+// Import consistente con lo que pegaste (../refunds/refund.entity).
+// Asegurate de que el archivo exista exactamente en: src/refunds/refund.entity.ts
+import { Refund, RefundStatus } from '../refunds/refund.entity';
 
 const pesos = (n: number) =>
   new Intl.NumberFormat('es-AR', {
@@ -35,6 +40,13 @@ export class ReservationsService {
 
     @InjectRepository(User)
     private userRepo: Repository<User>,
+
+    // ✅ NUEVO: repo de devoluciones
+    @InjectRepository(Refund)
+    private refundsRepo: Repository<Refund>,
+
+    // ✅ NUEVO: transacciones
+    private readonly dataSource: DataSource,
 
     private readonly settings: SettingsService,
   ) {}
@@ -161,9 +173,7 @@ export class ReservationsService {
           ? `${r.client.firstName} ${r.client.lastName}`
           : 'Sin cliente',
         vehicle: r.vehicle
-          ? `${r.vehicle.brand} ${r.vehicle.model} ${
-              r.vehicle.versionName || ''
-            }`
+          ? `${r.vehicle.brand} ${r.vehicle.model} ${r.vehicle.versionName || ''}`
           : 'Sin vehículo',
         plate: r.vehicle?.plate || '-',
         date: r.date,
@@ -220,17 +230,9 @@ export class ReservationsService {
     const expiry = this.plusHours(date, 48);
 
     // 🔹 Obtener monto por defecto desde settings (reservation.amount)
-    const defaultAmount = await this.settings.getNumber(
-      'reservation.amount',
-      500_000,
-    );
+    const defaultAmount = await this.settings.getNumber('reservation.amount', 500_000);
 
-    let amount: number;
-    if (dto.amount != null) {
-      amount = Number(dto.amount);
-    } else {
-      amount = defaultAmount;
-    }
+    const amount = dto.amount != null ? Number(dto.amount) : defaultAmount;
 
     if (!Number.isFinite(amount) || amount <= 0) {
       throw new BadRequestException('Monto de reserva inválido');
@@ -246,9 +248,7 @@ export class ReservationsService {
       status: 'Vigente',
       updatedAt: new Date(),
       plate: vehicle.plate,
-      vehicleLabel: `${vehicle.brand} ${vehicle.model} ${
-        vehicle.versionName || ''
-      }`.trim(),
+      vehicleLabel: `${vehicle.brand} ${vehicle.model} ${vehicle.versionName || ''}`.trim(),
     });
 
     const saved = await this.reservationsRepo.save(reservation);
@@ -260,43 +260,109 @@ export class ReservationsService {
   }
 
   // ✅ Método actualizado (estados y sincronización con vehículo)
+  // ✅ NUEVO: al pasar a "Cancelada" crea devolución (Refund) en la misma transacción
   async update(id: number, dto: { status?: Reservation['status'] }) {
     const res = await this.findOne(id);
 
-    if (dto.status) {
-      const prevStatus = res.status;
-      res.status = dto.status;
-      res.updatedAt = new Date();
-      await this.reservationsRepo.save(res);
+    // ✅ Fix TS2322/TS2345: dto.status es opcional
+    const nextStatus = dto.status;
+    if (!nextStatus) return res;
 
-      // 🔄 Si pasa a Cancelada o Vencida → liberar vehículo
-      if (['Cancelada', 'Vencida'].includes(dto.status)) {
-        const v = await this.vehicleRepo.findOne({ where: { id: res.vehicle.id } });
+    const prevStatus = res.status;
+
+    // ✅ Si el estado no cambia, no hacemos nada extra
+    if (prevStatus === nextStatus) return res;
+
+    // ✅ Guardamos “canceledAt” lógico (si Cancelada)
+    const canceledAt = nextStatus === 'Cancelada' ? new Date() : null;
+
+    await this.dataSource.transaction(async (manager) => {
+      const reservationsRepoTx = manager.getRepository(Reservation);
+      const vehicleRepoTx = manager.getRepository(Vehicle);
+      const refundsRepoTx = manager.getRepository(Refund);
+
+      // 1) actualizar reserva
+      res.status = nextStatus;
+      res.updatedAt = new Date();
+
+      // Si tenés un campo canceledAt en Reservation, lo seteamos sin romper compilación:
+      // (res as any).canceledAt = canceledAt ? canceledAt : (res as any).canceledAt;
+
+      await reservationsRepoTx.save(res);
+
+      // 2) sincronización con vehículo
+      if (nextStatus === 'Cancelada' || nextStatus === 'Vencida') {
+        const v = await vehicleRepoTx.findOne({ where: { id: res.vehicle.id } });
         if (v) {
           v.status = 'available';
-          await this.vehicleRepo.save(v);
+          await vehicleRepoTx.save(v);
           console.log(
-            `[${this.nowString()}] 🚗 Vehículo ${v.plate} liberado por cambio de estado (${dto.status}).`,
+            `[${this.nowString()}] 🚗 Vehículo ${v.plate} liberado por cambio de estado (${nextStatus}).`,
           );
         }
       }
 
-      // 🔒 Si pasa a Vigente → marcar vehículo como reservado
-      if (dto.status === 'Vigente') {
-        const v = await this.vehicleRepo.findOne({ where: { id: res.vehicle.id } });
+      if (nextStatus === 'Vigente') {
+        const v = await vehicleRepoTx.findOne({ where: { id: res.vehicle.id } });
         if (v) {
           v.status = 'reserved';
-          await this.vehicleRepo.save(v);
+          await vehicleRepoTx.save(v);
           console.log(
             `[${this.nowString()}] 🚗 Vehículo ${v.plate} marcado como reservado nuevamente.`,
           );
         }
       }
 
-      console.log(
-        `[${this.nowString()}] Estado de reserva #${res.id} actualizado: ${prevStatus} → ${dto.status}`,
-      );
-    }
+      // 3) ✅ Si pasa a Cancelada → crear devolución (si no existe)
+      if (nextStatus === 'Cancelada') {
+        const already = await refundsRepoTx.findOne({
+          where: { reservationId: res.id },
+        });
+
+        if (!already) {
+          // 🔹 Monto de devolución configurable en settings
+          //    Inicialmente en $750.000 (default)
+          const refundAmount = await this.settings.getNumber(
+            'reservation.refundAmount',
+            750_000,
+          );
+
+          // ✅ Evitar undefined en columnas NOT NULL
+          const clientDni = res.client?.dni ?? '-';
+          const plate = res.plate ?? res.vehicle?.plate ?? '-';
+          const vehicleLabel = res.vehicleLabel ?? '-';
+
+          const refund = refundsRepoTx.create({
+            reservationId: res.id,
+            clientDni,
+            plate,
+            vehicleLabel,
+            canceledAt: canceledAt ?? new Date(),
+            status: RefundStatus.PENDING,
+            expectedAmount: Number(refundAmount),
+            paidAmount: null,
+            deliveredAt: null,
+            deliveredByUserId: null,
+          } as Partial<Refund>);
+
+          await refundsRepoTx.save(refund);
+
+          console.log(
+            `[${this.nowString()}] 💸 Devolución creada para reserva #${res.id} por ${pesos(
+              Number(refundAmount),
+            )} (Pendiente).`,
+          );
+        } else {
+          console.log(
+            `[${this.nowString()}] 💸 Devolución ya existente para reserva #${res.id}. No se duplica.`,
+          );
+        }
+      }
+    });
+
+    console.log(
+      `[${this.nowString()}] Estado de reserva #${res.id} actualizado: ${prevStatus} → ${nextStatus}`,
+    );
 
     return res;
   }
@@ -351,10 +417,7 @@ export class ReservationsService {
         (g) => new Date(g.createdAt) > cutoff,
       );
       if (recentGuarantors.length > 0) {
-        reservation.expiryDate = this.plusHours(
-          new Date(reservation.expiryDate),
-          24,
-        );
+        reservation.expiryDate = this.plusHours(new Date(reservation.expiryDate), 24);
         reservation.updatedAt = new Date();
         await this.reservationsRepo.save(reservation);
         console.log(
@@ -486,9 +549,7 @@ export class ReservationsService {
     doc.text(`Estado: ${res.status}`);
     doc.text(`Importe de Reserva: ${pesos(Number(res.amount))}`);
     doc.text(`Fecha: ${new Date(res.date).toLocaleDateString('es-AR')}`);
-    doc.text(
-      `Vigencia hasta: ${this.formatDateTimeAR(new Date(res.expiryDate))}`,
-    );
+    doc.text(`Vigencia hasta: ${this.formatDateTimeAR(new Date(res.expiryDate))}`);
 
     sectionTitle('Cliente');
     doc.text(`${res.client.firstName} ${res.client.lastName}`);
