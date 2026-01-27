@@ -21,6 +21,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
+import { PermissionsGuard } from '../auth/permissions.guard';
+import { RequirePermissions } from '../auth/permissions.decorator';
+
 @ApiTags('Reservations')
 @Controller('reservations')
 export class ReservationsController {
@@ -42,7 +45,7 @@ export class ReservationsController {
     return this.reservationsService.findOne(id);
   }
 
-  // 🔹 Crear una nueva reserva (protegido)
+  // 🔹 Crear una nueva reserva (protegido) — sin permiso por ahora (no lo pediste)
   @UseGuards(JwtAuthGuard)
   @Post()
   @ApiOperation({ summary: 'Crear una nueva reserva y generar PDF' })
@@ -84,9 +87,45 @@ export class ReservationsController {
     }
   }
 
-  // 🔹 Actualizar reserva existente (protegido)
-  @UseGuards(JwtAuthGuard)
+  // ✅ ACEPTAR reserva (Gerencia/Admin)
+  // Interpretación: aceptar = poner la reserva en "Vigente"
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @Patch(':id/approve')
+  @RequirePermissions('RESERVATION_APPROVE')
+  @ApiOperation({ summary: 'Aceptar reserva (pasar a Vigente)' })
+  async approve(@Param('id', ParseIntPipe) id: number) {
+    try {
+      return await this.reservationsService.update(id, { status: 'Vigente' });
+    } catch (error) {
+      console.error('Error al aceptar reserva:', error);
+      throw new HttpException(
+        'Error al aceptar la reserva',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  // ✅ CANCELAR reserva (Gerencia/Admin)
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @Patch(':id/cancel')
+  @RequirePermissions('RESERVATION_CANCEL')
+  @ApiOperation({ summary: 'Cancelar reserva (pasar a Cancelada)' })
+  async cancel(@Param('id', ParseIntPipe) id: number) {
+    try {
+      return await this.reservationsService.update(id, { status: 'Cancelada' });
+    } catch (error) {
+      console.error('Error al cancelar reserva:', error);
+      throw new HttpException(
+        'Error al cancelar la reserva',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  // 🔹 Editar reserva existente (Gerencia/Admin)
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Patch(':id')
+  @RequirePermissions('RESERVATION_EDIT')
   @ApiOperation({ summary: 'Actualizar una reserva existente' })
   async update(@Param('id', ParseIntPipe) id: number, @Body() dto: any) {
     try {
@@ -100,7 +139,7 @@ export class ReservationsController {
     }
   }
 
-  // 🔹 Agregar garante con archivos adjuntos (protegido)
+  // 🔹 Agregar garante con archivos adjuntos (protegido) — sin permiso por ahora
   @UseGuards(JwtAuthGuard)
   @Post(':id/guarantors')
   @UseInterceptors(AnyFilesInterceptor())
@@ -166,7 +205,7 @@ export class ReservationsController {
     }
   }
 
-  // 🔹 Forzar expiración manual (protegido)
+  // 🔹 Forzar expiración manual (protegido) — sin permiso por ahora
   @UseGuards(JwtAuthGuard)
   @Post('expire')
   @ApiOperation({

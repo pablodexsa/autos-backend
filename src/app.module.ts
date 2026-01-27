@@ -49,6 +49,10 @@ import { Brand } from './brands/brand.entity';
 import { Model } from './models/model.entity';
 import { Version } from './versions/version.entity';
 
+// ✅ NUEVO: permisos
+import { Permission } from './permissions/permission.entity';
+import { RolePermission } from './permissions/role-permission.entity';
+
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
@@ -78,6 +82,10 @@ import { Version } from './versions/version.entity';
         Model,
         Version,
         Setting,
+
+        // ✅ NUEVO
+        Permission,
+        RolePermission,
       ],
     }),
 

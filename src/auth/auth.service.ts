@@ -1,4 +1,9 @@
-﻿import { Injectable, UnauthorizedException, InternalServerErrorException, Logger } from '@nestjs/common';
+﻿import {
+  Injectable,
+  UnauthorizedException,
+  InternalServerErrorException,
+  Logger,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
 import * as bcrypt from 'bcrypt';
@@ -12,48 +17,44 @@ export class AuthService {
     private readonly jwtService: JwtService,
   ) {}
 
-  // ✅ Validar credenciales correctamente
   async validateUser(email: string, pass: string) {
-
-    console.log("🟦 VALIDANDO LOGIN", { email, pass });
+    console.log('🟦 VALIDANDO LOGIN', { email, pass });
 
     const user = await this.usersService.findByEmail(email);
 
-    console.log("🟩 Usuario encontrado en DB:", user);
+    console.log('🟩 Usuario encontrado en DB:', user);
 
     if (!user) {
-      console.log("❌ Usuario no encontrado en BD");
+      console.log('❌ Usuario no encontrado en BD');
       throw new UnauthorizedException('Usuario no encontrado');
     }
 
     const stored = user.password;
     const isHashed = stored?.startsWith('$2b$');
 
-    console.log("🔐 HASH DETECTADO:", isHashed, stored);
+    console.log('🔐 HASH DETECTADO:', isHashed, stored);
 
     let isMatch = false;
 
     if (isHashed) {
-      // ✅ Comparar contraseñas hasheadas
       isMatch = await bcrypt.compare(pass, stored);
     } else {
-      // ✅ Comparación texto plano (usuarios viejos)
       isMatch = stored === pass;
     }
 
-    console.log("✅ Resultado bcrypt.compare / texto plano:", isMatch);
+    console.log('✅ Resultado bcrypt.compare / texto plano:', isMatch);
 
     if (!isMatch) {
-      console.log("❌ CONTRASEÑA INCORRECTA");
+      console.log('❌ CONTRASEÑA INCORRECTA');
       throw new UnauthorizedException('Contraseña incorrecta');
     }
 
-    console.log("✅ LOGIN VALIDADO CORRECTAMENTE");
+    console.log('✅ LOGIN VALIDADO CORRECTAMENTE');
 
     return user;
   }
 
-  // ✅ Generar token compatible con frontend
+  // 🔐 LOGIN → ahora incluye permisos reales
   async login(user: any) {
     try {
       const payload = {
@@ -64,13 +65,20 @@ export class AuthService {
 
       const token = this.jwtService.sign(payload);
 
+      // ✅ Extraer permisos del rol
+      const permissions: string[] =
+        user.role?.rolePermissions
+          ?.map((rp) => rp.permission?.code)
+          .filter(Boolean) || [];
+
       return {
-        access_token: token,  // ✅ clave que espera el frontend
+        access_token: token,
         user: {
           id: user.id,
           name: user.name,
           email: user.email,
           role: user.role?.name || user.role || 'user',
+          permissions, // 👈 NUEVO
         },
       };
     } catch (error) {
@@ -79,7 +87,6 @@ export class AuthService {
     }
   }
 
-  // ✅ Login directo
   async signIn(email: string, password: string) {
     const user = await this.validateUser(email, password);
     return await this.login(user);

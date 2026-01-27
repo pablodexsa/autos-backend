@@ -24,6 +24,9 @@ export class UsersService {
     const qb = this.userRepo
       .createQueryBuilder('user')
       .leftJoinAndSelect('user.role', 'role')
+      // ✅ traer rolePermissions + permission para que también salga si listás users
+      .leftJoinAndSelect('role.rolePermissions', 'rolePermissions')
+      .leftJoinAndSelect('rolePermissions.permission', 'permission')
       .orderBy('user.createdAt', 'DESC');
 
     if (query?.q) {
@@ -39,8 +42,13 @@ export class UsersService {
   async findOne(id: number) {
     const user = await this.userRepo.findOne({
       where: { id },
-      relations: ['role'],
+      relations: [
+        'role',
+        'role.rolePermissions',
+        'role.rolePermissions.permission',
+      ],
     });
+
     if (!user) throw new NotFoundException('User not found');
     return user;
   }
@@ -48,7 +56,11 @@ export class UsersService {
   async findByEmail(email: string) {
     return this.userRepo.findOne({
       where: { email },
-      relations: ['role'],
+      relations: [
+        'role',
+        'role.rolePermissions',
+        'role.rolePermissions.permission',
+      ],
     });
   }
 

@@ -26,9 +26,12 @@ import { VehiclesService } from './vehicles.service';
 import { CreateVehicleDto } from './dto/create-vehicle.dto';
 import { UpdateVehicleDto } from './dto/update-vehicle.dto';
 import { QueryVehicleDto } from './dto/query-vehicle.dto';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
-@UseGuards(JwtAuthGuard)
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { PermissionsGuard } from '../auth/permissions.guard';
+import { RequirePermissions } from '../auth/permissions.decorator';
+
+@UseGuards(JwtAuthGuard) // ✅ auth para todo el controller
 @Controller('vehicles')
 export class VehiclesController {
   constructor(private readonly vehiclesService: VehiclesService) {}
@@ -93,12 +96,15 @@ export class VehiclesController {
   // CRUD VEHÍCULOS
   // ============================
 
+  // ✅ Nuevo vehículo → requiere permiso
   @Post()
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('VEHICLE_CREATE')
   create(@Body() dto: CreateVehicleDto) {
     return this.vehiclesService.create(dto);
   }
 
-  // ✅ Listado: usar DTO completo (brandId/modelId/versionId/concesionaria/etc)
+  // ✅ Listado (sin permiso por ahora)
   @Get()
   findAll(@Query() q: QueryVehicleDto) {
     q.page = q.page && Number(q.page) > 0 ? Number(q.page) : 1;
@@ -106,17 +112,24 @@ export class VehiclesController {
     return this.vehiclesService.findAll(q);
   }
 
+  // ✅ Detalle (sin permiso por ahora)
   @Get(':id')
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.vehiclesService.findOne(id);
   }
 
+  // ✅ Editar vehículo → requiere permiso
   @Patch(':id')
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('VEHICLE_EDIT')
   update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateVehicleDto) {
     return this.vehiclesService.update(id, dto);
   }
 
+  // ✅ Eliminar vehículo → requiere permiso
   @Delete(':id')
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('VEHICLE_DELETE')
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.vehiclesService.remove(id);
   }

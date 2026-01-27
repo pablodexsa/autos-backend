@@ -25,13 +25,18 @@ import { diskStorage } from 'multer';
 import * as path from 'path';
 import * as express from 'express';
 
+import { PermissionsGuard } from '../auth/permissions.guard';
+import { RequirePermissions } from '../auth/permissions.decorator';
+
 @UseGuards(JwtAuthGuard) // 👈 NECESARIO para que Auditoría tenga usuario
 @Controller('clients')
 export class ClientsController {
   constructor(private readonly clientsService: ClientsService) {}
 
-  // ✅ Crear nuevo cliente
+  // ✅ Crear nuevo cliente (requiere permiso)
   @Post()
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('CLIENT_CREATE')
   async create(@Body() data: CreateClientDto) {
     console.log('📩 Datos recibidos en el backend:', data);
     try {
@@ -47,13 +52,13 @@ export class ClientsController {
     }
   }
 
-  // ✅ Listar todos los clientes
+  // ✅ Listar todos los clientes (sin permiso por ahora)
   @Get()
   async findAll() {
     return this.clientsService.findAll();
   }
 
-  // ✅ Buscar cliente por DNI (autocompletado / búsqueda rápida)
+  // ✅ Buscar cliente por DNI (autocompletado / búsqueda rápida) (sin permiso por ahora)
   @Get('search/by-dni')
   async searchByDni(@Query('dni') dni: string) {
     if (!dni || dni.trim() === '') {
@@ -63,7 +68,7 @@ export class ClientsController {
   }
 
   // ============================
-  // 📄 SUBIR DNI CLIENTE
+  // 📄 SUBIR DNI CLIENTE (sin permiso por ahora)
   // ============================
   @Post(':id/dni')
   @UseInterceptors(
@@ -93,7 +98,7 @@ export class ClientsController {
   }
 
   // ============================
-  // 📄 DESCARGAR DNI CLIENTE
+  // 📄 DESCARGAR DNI CLIENTE (sin permiso por ahora)
   // ============================
   @Get(':id/dni')
   async downloadDni(
@@ -104,7 +109,7 @@ export class ClientsController {
     return res.download(absPath, filename);
   }
 
-  // ✅ Obtener cliente por ID
+  // ✅ Obtener cliente por ID (sin permiso por ahora)
   @Get(':id')
   async findOne(@Param('id', ParseIntPipe) id: number) {
     const client = await this.clientsService.findOne(id);
@@ -114,8 +119,10 @@ export class ClientsController {
     return client;
   }
 
-  // ✅ Actualizar cliente
+  // ✅ Actualizar cliente (requiere permiso)
   @Put(':id')
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('CLIENT_EDIT')
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() data: UpdateClientDto,
@@ -128,7 +135,7 @@ export class ClientsController {
     }
   }
 
-  // ✅ Eliminar cliente
+  // ✅ Eliminar cliente (no lo pediste en la matriz; lo dejamos solo con auth)
   @Delete(':id')
   async remove(@Param('id', ParseIntPipe) id: number) {
     try {
