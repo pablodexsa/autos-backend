@@ -38,6 +38,12 @@ export class Vehicle {
   version: Version;
 
   // =========================
+  // Estado / Soft delete
+  // =========================
+  @Column({ type: 'boolean', default: true })
+  isActive: boolean;
+
+  // =========================
   // Datos del vehículo
   // =========================
   @Column('int')

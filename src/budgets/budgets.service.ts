@@ -10,6 +10,7 @@ import { Vehicle } from '../vehicles/vehicle.entity';
 import { Client } from '../clients/entities/client.entity';
 import { LoanRate } from '../loan-rates/loan-rate.entity';
 import { BudgetReportsService } from '../budget-reports/budget-reports.service';
+import { MailService } from '../mail/mail.service';
 import PDFDocument from 'pdfkit';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -31,6 +32,9 @@ export class BudgetsService {
 
     // 👇 Servicio de reportes inyectado
     private readonly budgetReportsService: BudgetReportsService,
+
+    // 👇 Email (Gmail SMTP)
+    private readonly mailService: MailService,
   ) {}
 
   async findAll(): Promise<Budget[]> {
@@ -66,11 +70,9 @@ export class BudgetsService {
 
     // 🔄 Normalizar montos provenientes del frontend (soporta nombres antiguos y nuevos)
     // ⬇️ lo pasamos a let para poder ajustarlo en el caso especial
-    let downPayment =
-      dto.downPayment != null ? Number(dto.downPayment) : 0;
+    let downPayment = dto.downPayment != null ? Number(dto.downPayment) : 0;
 
-    const hasTradeIn =
-      dto.hasTradeIn === true || dto.hasTradeIn === 'true';
+    const hasTradeIn = dto.hasTradeIn === true || dto.hasTradeIn === 'true';
     const tradeInValue =
       hasTradeIn && dto.tradeInValue != null ? Number(dto.tradeInValue) : 0;
 
@@ -298,6 +300,58 @@ export class BudgetsService {
       // No relanzamos el error para no impedir la creación del presupuesto
     }
 
+    // ✅ Opción B: enviar email SOLO al crear el presupuesto
+    try {
+      const clientEmail = (client as any)?.email;
+      if (clientEmail) {
+        const pdfBuffer = await this.getPdf(saved.id);
+
+        const vehicleLabel = vehicle
+          ? `${vehicle.brand} ${vehicle.model}${
+              vehicle.versionName ? ` ${vehicle.versionName}` : ''
+            }`
+          : 'Vehículo';
+
+        const html = `
+          <p>Hola ${client?.firstName ?? ''} ${client?.lastName ?? ''},</p>
+
+          <p>Te enviamos el presupuesto solicitado.</p>
+
+          <ul>
+            <li><strong>Presupuesto Nº:</strong> ${saved.id}</li>
+            <li><strong>Vehículo:</strong> ${vehicleLabel}</li>
+            <li><strong>Fecha:</strong> ${new Date(saved.createdAt).toLocaleDateString('es-AR')}</li>
+          </ul>
+
+          <p>Adjunto vas a encontrar el PDF del presupuesto.</p>
+
+          <p>
+            Saludos,<br/>
+            <strong>GL Motors</strong>
+          </p>
+        `;
+
+        await this.mailService.sendWithPdf({
+          to: clientEmail,
+          subject: `Presupuesto #${saved.id} - ${vehicleLabel}`,
+          filename: `Presupuesto-${saved.id}.pdf`,
+          pdfBuffer,
+          html,
+        });
+
+        console.log('✅ Presupuesto enviado por email a:', clientEmail);
+      } else {
+        console.warn(
+          `⚠️ El cliente del presupuesto ${saved.id} no tiene email cargado.`,
+        );
+      }
+    } catch (err) {
+      console.error(
+        `❌ No se pudo enviar el presupuesto ${saved.id} por email (el presupuesto se creó igual):`,
+        err,
+      );
+    }
+
     return saved;
   }
 
@@ -343,6 +397,7 @@ export class BudgetsService {
   }
 
   // 🖨️ Generar PDF similar al de venta pero para presupuesto
+  // ✅ Opción B: getPdf SOLO GENERA el PDF. NO envía email.
   async getPdf(id: number): Promise<Buffer> {
     const budget = await this.findOne(id);
 
@@ -371,7 +426,7 @@ export class BudgetsService {
     }
 
     // Encabezado
-    doc.fontSize(22).fillColor('#1e1e1e').text('DE GRAZIA AUTOMOTORES', {
+    doc.fontSize(22).fillColor('#1e1e1e').text('GL Motors', {
       align: 'center',
     });
     doc.fontSize(12).fillColor('#555').text('Presupuesto de Venta', {
@@ -423,8 +478,7 @@ export class BudgetsService {
       doc.text(`Anticipo: ${formatPesos(budget.downPayment)}`);
     if (budget.tradeInValue != null)
       doc.text(`Valor de Permuta: ${formatPesos(budget.tradeInValue)}`);
-    if (budget.price != null)
-      doc.text(`Precio Lista: ${formatPesos(budget.price)}`);
+    if (budget.price != null) doc.text(`Precio Lista: ${formatPesos(budget.price)}`);
     if (budget.installmentValue != null)
       doc.text(`Valor de Cuota Total: ${formatPesos(budget.installmentValue)}`);
 
@@ -437,7 +491,10 @@ export class BudgetsService {
     if (hasLoans) {
       sectionTitle('Detalle de Préstamos y Financiaciones');
 
-      const calcConInteres = (montoNeto?: number | null, tasa?: number | null) => {
+      const calcConInteres = (
+        montoNeto?: number | null,
+        tasa?: number | null,
+      ) => {
         if (!montoNeto) return 0;
         if (!tasa) return montoNeto;
         return montoNeto * (1 + tasa / 100);
@@ -459,8 +516,6 @@ export class BudgetsService {
         doc
           .fontSize(11)
           .fillColor('#000')
-          .text(`Monto (neto): ${formatPesos(montoNeto)}`)
-          .text(`Tasa aplicada: ${budget.prendarioRate ?? 0}%`)
           .text(`Cuotas: ${budget.installments ?? '-'}`)
           .text(
             `Valor de cada cuota (con financiación): ${formatPesos(cuota)}`,
@@ -483,8 +538,6 @@ export class BudgetsService {
         doc
           .fontSize(11)
           .fillColor('#000')
-          .text(`Monto (neto): ${formatPesos(montoNeto)}`)
-          .text(`Tasa aplicada: ${budget.personalRate ?? 0}%`)
           .text(`Cuotas: ${budget.installments ?? '-'}`)
           .text(
             `Valor de cada cuota (con financiación): ${formatPesos(cuota)}`,
@@ -507,8 +560,6 @@ export class BudgetsService {
         doc
           .fontSize(11)
           .fillColor('#000')
-          .text(`Monto (neto): ${formatPesos(montoNeto)}`)
-          .text(`Tasa aplicada: ${budget.financiacionRate ?? 0}%`)
           .text(`Cuotas: ${budget.installments ?? '-'}`)
           .text(
             `Valor de cada cuota (con financiación): ${formatPesos(cuota)}`,
@@ -524,6 +575,12 @@ export class BudgetsService {
       );
       if ((budget.client as any).dni) {
         doc.text(`DNI: ${(budget.client as any).dni}`);
+      }
+      if ((budget.client as any).email) {
+        doc.text(`Email: ${(budget.client as any).email}`);
+      }
+      if ((budget.client as any).phone) {
+        doc.text(`Teléfono: ${(budget.client as any).phone}`);
       }
     }
 
@@ -566,8 +623,10 @@ export class BudgetsService {
 
     doc.end();
     await done;
+
     const pdfBuffer = Buffer.concat(chunks);
     fs.writeFileSync(filePath, pdfBuffer);
+
     return pdfBuffer;
   }
 }

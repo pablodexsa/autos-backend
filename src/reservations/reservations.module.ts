@@ -11,12 +11,14 @@ import { ReservationsTasks } from './reservations.tasks';
 import { SettingsModule } from '../settings/settings.module';
 import { AuditModule } from '../audit/audit.module'; // 👈 NUEVO
 import { Refund } from '../refunds/refund.entity';
+import { MailModule } from '../mail/mail.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Reservation, Guarantor, Vehicle, Client, User, Refund,]),
     SettingsModule, // para poder inyectar SettingsService en ReservationsService
     AuditModule,     // 👈 SE AGREGA AQUÍ
+    MailModule,
   ],
   controllers: [ReservationsController],
   providers: [ReservationsService, ReservationsTasks],

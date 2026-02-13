@@ -133,7 +133,7 @@ export class InstallmentPaymentController {
     doc
       .fontSize(12)
       .fillColor('#555')
-      .text('De Grazia Automotores', { align: 'center' });
+      .text('GL Motors', { align: 'center' });
     doc.moveDown(1);
     doc
       .moveTo(50, doc.y)

@@ -33,6 +33,8 @@ import { LoanRatesModule } from './loan-rates/loan-rates.module';
 import { AuditModule } from './audit/audit.module';
 import { SettingsModule } from './settings/settings.module';
 import { Setting } from './settings/setting.entity';
+import { MailModule } from './mail/mail.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 // 📦 Entidades
 import { User } from './users/user.entity';
@@ -114,6 +116,9 @@ import { RolePermission } from './permissions/role-permission.entity';
     LoanRatesModule,
     AuditModule,
     SettingsModule,
+    MailModule,
+    ScheduleModule.forRoot(),
+    NotificationsModule,
 
     // ✅ NUEVO: expone /refunds
     RefundsModule,

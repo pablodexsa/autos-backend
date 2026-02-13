@@ -175,7 +175,7 @@ export class RefundsService {
     doc
       .fontSize(22)
       .fillColor('#1e1e1e')
-      .text('DE GRAZIA AUTOMOTORES', { align: 'center' });
+      .text('GL Motors', { align: 'center' });
     doc
       .fontSize(12)
       .fillColor('#555')
@@ -238,7 +238,7 @@ export class RefundsService {
         .fontSize(8)
         .fillColor('#777')
         .text(
-          'De Grazia Automotores · Bolívar 1242 · Longchamps · Tel: +54 9 11 2850-5895',
+          'GL Motors · Dr. L. Chiesa 640 · Longchamps',
           110,
           footerY + 10,
           { align: 'left' },
@@ -248,7 +248,7 @@ export class RefundsService {
         .fontSize(8)
         .fillColor('#777')
         .text(
-          'De Grazia Automotores · Bolívar 1242 · Longchamps · Tel: +54 9 11 2850-5895',
+          'GL Motors · Dr. L. Chiesa 640 · Longchamps',
           { align: 'center' },
         );
     }

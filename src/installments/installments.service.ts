@@ -5,7 +5,11 @@
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, FindOptionsWhere } from 'typeorm';
-import { Installment } from './installment.entity';
+import {
+  Installment,
+  InstallmentReceiver,
+  InstallmentStatus,
+} from './installment.entity';
 import { Sale } from '../sales/sale.entity';
 import { Client } from '../clients/entities/client.entity';
 
@@ -68,7 +72,7 @@ export class InstallmentsService {
         'sale',
         'sale.client',
         'sale.installments', // ✅ necesario para total y posición
-        'sale.vehicle',      // ✅ necesario para patente / datos de vehículo
+        'sale.vehicle', // ✅ necesario para patente / datos de vehículo
         'payments',
         'client',
       ],
@@ -205,7 +209,7 @@ export class InstallmentsService {
     id: number,
     amount: number,
     paymentDate: string,
-    receiver: 'AGENCY' | 'STUDIO',
+    receiver: InstallmentReceiver,
     observations?: string,
   ) {
     const inst = await this.installmentsRepository.findOne({
@@ -222,7 +226,7 @@ export class InstallmentsService {
     }
 
     // Principal base (sin interés) antes del pago
-    let basePrincipal =
+    const basePrincipal =
       inst.remainingAmount != null
         ? Number(inst.remainingAmount)
         : Number(inst.amount);
@@ -278,6 +282,8 @@ export class InstallmentsService {
 
     // Guardamos la fecha "real" de pago para trazabilidad y recibo
     const effectiveDate = paymentDate ? new Date(paymentDate) : new Date();
+
+    // ✅ enums reales (no strings)
     inst.receiver = receiver;
     inst.lastPaymentAt = effectiveDate;
 
@@ -285,7 +291,7 @@ export class InstallmentsService {
       // Consideramos la cuota saldada
       inst.remainingAmount = 0;
       inst.paid = true;
-      inst.status = 'PAID';
+      inst.status = InstallmentStatus.PAID;
       inst.paymentDate = effectiveDate;
     } else {
       /**
@@ -303,7 +309,7 @@ export class InstallmentsService {
 
       inst.remainingAmount = +Math.max(newPrincipal, 0).toFixed(2);
       inst.paid = false;
-      inst.status = 'PARTIALLY_PAID';
+      inst.status = InstallmentStatus.PARTIALLY_PAID;
       inst.paymentDate = null;
     }
 
@@ -323,7 +329,7 @@ export class InstallmentsService {
     const inst = await this.findOne(id);
 
     inst.paid = true;
-    inst.status = 'PAID';
+    inst.status = InstallmentStatus.PAID;
     inst.remainingAmount = 0;
     inst.paymentDate = new Date();
 
@@ -336,7 +342,7 @@ export class InstallmentsService {
     const inst = await this.findOne(id);
 
     inst.paid = false;
-    inst.status = 'PENDING';
+    inst.status = InstallmentStatus.PENDING;
     inst.remainingAmount = inst.amount;
     inst.paymentDate = null;
 

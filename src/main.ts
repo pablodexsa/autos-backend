@@ -56,7 +56,7 @@ async function bootstrap() {
 
   // Swagger
   const config = new DocumentBuilder()
-    .setTitle('De Grazia Automotores - API')
+    .setTitle('GL Motors - API')
     .setDescription('Backend para gestión de vehículos, ventas y cuotas')
     .setVersion('1.0')
     .build();

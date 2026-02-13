@@ -1,15 +1,15 @@
-import { IsNumber, IsPositive, IsDateString, IsIn, IsOptional, IsString } from 'class-validator';
+import { IsNumber, IsDateString, IsOptional, IsString, IsEnum } from 'class-validator';
+import { InstallmentReceiver } from '../installment.entity';
 
 export class ApplyInstallmentPaymentDto {
-  @IsNumber({}, { message: 'El monto debe ser un número' })
-  @IsPositive({ message: 'El monto debe ser mayor a 0' })
+  @IsNumber()
   amount: number;
 
-  @IsDateString({}, { message: 'La fecha de pago debe tener un formato válido' })
+  @IsDateString()
   paymentDate: string;
 
-  @IsIn(['AGENCY', 'STUDIO'], { message: 'Recibe debe ser Agencia o Estudio' })
-  receiver: 'AGENCY' | 'STUDIO';
+  @IsEnum(InstallmentReceiver)
+  receiver: InstallmentReceiver;
 
   @IsOptional()
   @IsString()

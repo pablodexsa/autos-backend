@@ -8,12 +8,14 @@ import { Client } from '../clients/entities/client.entity';
 import { BudgetReportsModule } from '../budget-reports/budget-reports.module';
 import { LoanRate } from '../loan-rates/loan-rate.entity';
 import { AuditModule } from '../audit/audit.module'; // 👈 NUEVO
+import { MailModule } from '../mail/mail.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Budget, Vehicle, Client, LoanRate]),
     BudgetReportsModule,
     AuditModule, // 👈 SE AGREGA AQUÍ
+    MailModule,
   ],
   controllers: [BudgetsController],
   providers: [BudgetsService],

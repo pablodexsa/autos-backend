@@ -12,6 +12,7 @@ import { ClientsModule } from '../clients/clients.module';
 import { VehiclesModule } from '../vehicles/vehicles.module';
 import { LoanRate } from '../loan-rates/loan-rate.entity';
 import { AuditModule } from '../audit/audit.module'; // 👈 NUEVO
+import { MailModule } from '../mail/mail.module'; // ✅ NUEVO
 
 @Module({
   imports: [
@@ -27,9 +28,11 @@ import { AuditModule } from '../audit/audit.module'; // 👈 NUEVO
     forwardRef(() => ClientsModule),
     forwardRef(() => VehiclesModule),
     AuditModule, // 👈 SE AGREGA AQUÍ
+    MailModule, // ✅ para poder inyectar MailService en SalesService
   ],
   controllers: [SalesController],
   providers: [SalesService],
   exports: [SalesService],
 })
 export class SalesModule {}
+

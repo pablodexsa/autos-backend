@@ -11,6 +11,7 @@ import { LoanRate } from '../loan-rates/loan-rate.entity'; // 🆕 import tasas
 import PDFDocument from 'pdfkit'; // ✅ Import corregido
 import * as fs from 'fs';
 import * as path from 'path';
+import { MailService } from '../mail/mail.service'; // ✅ NUEVO (email)
 
 function pmnt(p: number, r: number, n: number) {
   // Fórmula de amortización (cuota fija)
@@ -32,6 +33,7 @@ export class SalesService {
     @InjectRepository(Installment) private readonly instRepo: Repository<Installment>,
     @InjectRepository(Client) private readonly clientRepo: Repository<Client>,
     @InjectRepository(LoanRate) private readonly loanRateRepo: Repository<LoanRate>, // 🆕 repo tasas
+    private readonly mailService: MailService, // ✅ NUEVO
   ) {}
 
   // 🔍 Vehículos disponibles o reservados por DNI
@@ -165,6 +167,58 @@ export class SalesService {
       }
     }
 
+    // ✅ Opción B: enviar email SOLO al crear la venta
+    try {
+      const clientEmail = (saved as any)?.client?.email || (client as any)?.email;
+
+      if (clientEmail) {
+        const pdfBuffer = await this.getPdf(saved.id);
+
+        const vehicleLabel = saved.vehicle
+          ? `${saved.vehicle.brand} ${saved.vehicle.model}${
+              saved.vehicle.versionName ? ` ${saved.vehicle.versionName}` : ''
+            }`.trim()
+          : 'Vehículo';
+
+        const html = `
+          <p>Hola ${saved.clientName ?? ''},</p>
+
+          <p>Te enviamos el comprobante de la compra realizada.</p>
+
+          <ul>
+            <li><strong>Venta Nº:</strong> ${saved.id}</li>
+            <li><strong>Vehículo:</strong> ${vehicleLabel}</li>
+            <li><strong>Fecha:</strong> ${new Date(saved.createdAt).toLocaleDateString('es-AR')}</li>
+            <li><strong>Forma de pago:</strong> ${this.labelPayment(saved.paymentComposition) || '-'}</li>
+          </ul>
+
+          <p>Adjunto vas a encontrar el PDF del comprobante.</p>
+
+          <p>
+            Saludos,<br/>
+            <strong>GL Motors</strong>
+          </p>
+        `;
+
+        await this.mailService.sendWithPdf({
+          to: clientEmail,
+          subject: `Comprobante de Venta #${saved.id} - ${vehicleLabel}`,
+          filename: `venta_${saved.id}.pdf`,
+          pdfBuffer,
+          html,
+        });
+
+        console.log('✅ Venta enviada por email a:', clientEmail);
+      } else {
+        console.warn(`⚠️ La venta ${saved.id} no tiene email de cliente cargado.`);
+      }
+    } catch (err) {
+      console.error(
+        `❌ No se pudo enviar la venta ${saved.id} por email (la venta se creó igual):`,
+        err,
+      );
+    }
+
     return saved;
   }
 
@@ -215,7 +269,7 @@ export class SalesService {
     return row?.rate ?? 0;
   }
 
-  // 🖨️ Generar comprobante de venta profesional
+  // 🖨️ Generar comprobante de venta profesional (SOLO GENERA, NO ENVÍA EMAIL)
   async getPdf(id: number): Promise<Buffer> {
     const sale = await this.findOne(id);
 
@@ -246,7 +300,7 @@ export class SalesService {
     doc
       .fontSize(22)
       .fillColor('#1e1e1e')
-      .text('DE GRAZIA AUTOMOTORES', { align: 'center' });
+      .text('GL Motors', { align: 'center' });
     doc
       .fontSize(12)
       .fillColor('#555')
@@ -339,7 +393,6 @@ export class SalesService {
     const totalPrestamosConInteres =
       prendarioConInteres + personalConInteres + financiacionConInteres;
 
-    // asumimos misma cantidad de cuotas para todos, como en el front
     const nCuotasGlobal =
       sale.personalInstallments ||
       sale.prendarioInstallments ||
@@ -351,14 +404,12 @@ export class SalesService {
         ? totalPrestamosConInteres / nCuotasGlobal
         : 0;
 
-    // 💰 Detalle de préstamos y financiaciones
     const hasLoans =
       !!sale.prendarioAmount || !!sale.personalAmount || !!sale.inHouseAmount;
 
     if (hasLoans) {
       sectionTitle('Detalle de Préstamos y Financiaciones');
 
-      // Cuota total con financiación (global)
       if (valorCuotaTotalConInteres > 0) {
         doc.text(
           `Valor de Cuota total (con financiación): ${formatPesos(
@@ -419,7 +470,6 @@ export class SalesService {
         }
       }
 
-      // 🔁 Detalle de cuotas de la financiación interna (usando monto con interés si existe)
       if (
         sale.paymentComposition?.hasFinancing &&
         sale.inHouseAmount > 0 &&
@@ -500,11 +550,9 @@ export class SalesService {
       !!comp.hasPrendario || !!comp.hasPersonal || !!comp.hasFinancing;
 
     if (hasAnyFinancing) {
-      // Cualquier esquema con cuotas: se muestra como "Anticipo + Financiación"
       return 'Anticipo + Financiación';
     }
 
-    // Sin financiación: venta al contado (con o sin permuta/anticipo)
     return 'Contado';
   }
 }

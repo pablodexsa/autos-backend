@@ -10,10 +10,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import PDFDocument from 'pdfkit';
 import { SettingsService } from '../settings/settings.service';
+import { MailService } from '../mail/mail.service'; // ✅ EMAIL
 
 // ✅ NUEVO (módulo Devoluciones)
-// Import consistente con lo que pegaste (../refunds/refund.entity).
-// Asegurate de que el archivo exista exactamente en: src/refunds/refund.entity.ts
 import { Refund, RefundStatus } from '../refunds/refund.entity';
 
 const pesos = (n: number) =>
@@ -49,6 +48,9 @@ export class ReservationsService {
     private readonly dataSource: DataSource,
 
     private readonly settings: SettingsService,
+
+    // ✅ NUEVO: envío de emails
+    private readonly mailService: MailService,
   ) {}
 
   private readonly AR_TZ = 'America/Argentina/Buenos_Aires';
@@ -256,6 +258,63 @@ export class ReservationsService {
     vehicle.status = 'reserved';
     await this.vehicleRepo.save(vehicle);
 
+    // ✅ Opción B: enviar email SOLO al crear la reserva
+    try {
+      const clientEmail = (client as any)?.email;
+      if (clientEmail) {
+        const pdfBuffer = await this.getPdf(saved.id);
+
+        const vehicleLabel =
+          saved.vehicleLabel ||
+          `${vehicle.brand} ${vehicle.model} ${vehicle.versionName || ''}`.trim();
+
+        const html = `
+          <p>Hola ${client?.firstName ?? ''} ${client?.lastName ?? ''},</p>
+
+          <p>Te confirmamos que la reserva fue registrada correctamente.</p>
+
+          <ul>
+            <li><strong>Reserva Nº:</strong> ${saved.id}</li>
+            <li><strong>Vehículo:</strong> ${vehicleLabel}</li>
+            <li><strong>Patente:</strong> ${vehicle.plate}</li>
+            <li><strong>Importe de reserva:</strong> ${pesos(Number(saved.amount))}</li>
+            <li><strong>Fecha:</strong> ${new Date(saved.date).toLocaleDateString('es-AR')}</li>
+            <li><strong>Vigencia hasta:</strong> ${this.formatDateTimeAR(new Date(saved.expiryDate))}</li>
+          </ul>
+
+          <p>Adjunto vas a encontrar el comprobante en PDF.</p>
+
+          <p>
+            Saludos,<br/>
+            <strong>GL Motors</strong>
+          </p>
+        `;
+
+        // Nombre de archivo consistente con getPdf()
+        const today = new Date();
+        const dateString = today.toISOString().split('T')[0];
+        const lastName = client?.lastName || 'Cliente';
+        const filename = `Reserva-${lastName}-${dateString}-${saved.id}.pdf`;
+
+        await this.mailService.sendWithPdf({
+          to: clientEmail,
+          subject: `Reserva #${saved.id} - ${vehicleLabel}`,
+          filename,
+          pdfBuffer,
+          html,
+        });
+
+        console.log('✅ Reserva enviada por email a:', clientEmail);
+      } else {
+        console.warn(`⚠️ El cliente de la reserva ${saved.id} no tiene email cargado.`);
+      }
+    } catch (err) {
+      console.error(
+        `❌ No se pudo enviar la reserva ${saved.id} por email (la reserva se creó igual):`,
+        err,
+      );
+    }
+
     return saved;
   }
 
@@ -264,16 +323,13 @@ export class ReservationsService {
   async update(id: number, dto: { status?: Reservation['status'] }) {
     const res = await this.findOne(id);
 
-    // ✅ Fix TS2322/TS2345: dto.status es opcional
     const nextStatus = dto.status;
     if (!nextStatus) return res;
 
     const prevStatus = res.status;
 
-    // ✅ Si el estado no cambia, no hacemos nada extra
     if (prevStatus === nextStatus) return res;
 
-    // ✅ Guardamos “canceledAt” lógico (si Cancelada)
     const canceledAt = nextStatus === 'Cancelada' ? new Date() : null;
 
     await this.dataSource.transaction(async (manager) => {
@@ -281,16 +337,11 @@ export class ReservationsService {
       const vehicleRepoTx = manager.getRepository(Vehicle);
       const refundsRepoTx = manager.getRepository(Refund);
 
-      // 1) actualizar reserva
       res.status = nextStatus;
       res.updatedAt = new Date();
 
-      // Si tenés un campo canceledAt en Reservation, lo seteamos sin romper compilación:
-      // (res as any).canceledAt = canceledAt ? canceledAt : (res as any).canceledAt;
-
       await reservationsRepoTx.save(res);
 
-      // 2) sincronización con vehículo
       if (nextStatus === 'Cancelada' || nextStatus === 'Vencida') {
         const v = await vehicleRepoTx.findOne({ where: { id: res.vehicle.id } });
         if (v) {
@@ -313,21 +364,17 @@ export class ReservationsService {
         }
       }
 
-      // 3) ✅ Si pasa a Cancelada → crear devolución (si no existe)
       if (nextStatus === 'Cancelada') {
         const already = await refundsRepoTx.findOne({
           where: { reservationId: res.id },
         });
 
         if (!already) {
-          // 🔹 Monto de devolución configurable en settings
-          //    Inicialmente en $750.000 (default)
           const refundAmount = await this.settings.getNumber(
             'reservation.refundAmount',
             750_000,
           );
 
-          // ✅ Evitar undefined en columnas NOT NULL
           const clientDni = res.client?.dni ?? '-';
           const plate = res.plate ?? res.vehicle?.plate ?? '-';
           const vehicleLabel = res.vehicleLabel ?? '-';
@@ -398,7 +445,6 @@ export class ReservationsService {
     }
   }
 
-  // 🧭 Ejecutar expiración manual (para usar desde el controlador)
   async forceExpire(): Promise<{ expired: number }> {
     await this.expirePastReservations();
     return { expired: 1 };
@@ -484,7 +530,7 @@ export class ReservationsService {
     return updated;
   }
 
-  // ✅ PDF generación
+  // ✅ PDF generación (SOLO GENERA, NO ENVÍA EMAIL)
   async getPdf(id: number): Promise<Buffer> {
     const res = await this.reservationsRepo.findOne({
       where: { id },
@@ -522,7 +568,7 @@ export class ReservationsService {
     doc
       .fontSize(22)
       .fillColor('#1e1e1e')
-      .text('DE GRAZIA AUTOMOTORES', { align: 'center' });
+      .text('GL Motors', { align: 'center' });
     doc
       .fontSize(12)
       .fillColor('#555')
@@ -599,7 +645,7 @@ export class ReservationsService {
         .fontSize(8)
         .fillColor('#777')
         .text(
-          'De Grazia Automotores · Bolívar 1242 · Longchamps · Tel: +54 9 11 2850-5895',
+          'GL Motors · Dr. L. Chiesa 640 · Longchamps',
           110,
           footerY + 10,
           { align: 'left' },
@@ -609,7 +655,7 @@ export class ReservationsService {
         .fontSize(8)
         .fillColor('#777')
         .text(
-          'De Grazia Automotores · Bolívar 1242 · Longchamps · Tel: +54 9 11 2850-5895',
+          'GL Motors · Dr. L. Chiesa 640 · Longchamps',
           { align: 'center' },
         );
     }

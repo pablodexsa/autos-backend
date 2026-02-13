@@ -111,7 +111,7 @@ export class InstallmentPaymentService {
 
     const docDefinition: any = {
       watermark: {
-        text: 'DE GRAZIA AUTOMOTORES',
+        text: 'GL Motors',
         color: 'gray',
         opacity: 0.1,
         bold: true,

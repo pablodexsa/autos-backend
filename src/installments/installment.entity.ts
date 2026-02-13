@@ -7,29 +7,50 @@
   CreateDateColumn,
   UpdateDateColumn,
   JoinColumn,
+  Index,
 } from 'typeorm';
 import { Sale } from '../sales/sale.entity';
 import { InstallmentPayment } from '../installment-payments/installment-payment.entity';
 import { Client } from '../clients/entities/client.entity';
 
+export enum InstallmentStatus {
+  PENDING = 'PENDING',
+  PARTIALLY_PAID = 'PARTIALLY_PAID',
+  PAID = 'PAID',
+}
+
+export enum InstallmentReceiver {
+  AGENCY = 'AGENCY',
+  STUDIO = 'STUDIO',
+}
+
 @Entity({ name: 'installments' })
+@Index('idx_installments_dueDate_paid_status', ['dueDate', 'paid', 'status'])
+@Index('idx_installments_clientId', ['clientId'])
+@Index('idx_installments_saleId', ['saleId'])
 export class Installment {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @ManyToOne(() => Sale, (sale) => sale.installments, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Sale, (sale) => sale.installments, {
+    onDelete: 'CASCADE',
+    nullable: false,
+  })
   @JoinColumn({ name: 'saleId' })
   sale: Sale;
 
-  @Column({ nullable: true })
+  @Column({ type: 'int', nullable: false })
   saleId: number;
 
-  @ManyToOne(() => Client, { onDelete: 'CASCADE', nullable: true })
+  @ManyToOne(() => Client, {
+    onDelete: 'CASCADE',
+    nullable: false,
+  })
   @JoinColumn({ name: 'clientId' })
-  client?: Client | null;
+  client: Client;
 
-  @Column({ nullable: true })
-  clientId?: number | null;
+  @Column({ type: 'int', nullable: false })
+  clientId: number;
 
   /**
    * Monto original de la cuota
@@ -45,7 +66,10 @@ export class Installment {
   @Column('decimal', { precision: 12, scale: 2, nullable: true })
   remainingAmount: number | null;
 
-  @Column({ type: 'timestamp' })
+  /**
+   * Vencimiento (solo fecha). Evita problemas de timezone.
+   */
+  @Column({ type: 'date' })
   dueDate: Date;
 
   /**
@@ -56,13 +80,18 @@ export class Installment {
   paid: boolean;
 
   /**
-   * Estado textual de la cuota:
+   * Estado de la cuota:
    * - PENDING
    * - PARTIALLY_PAID
    * - PAID
    */
-  @Column({ default: 'PENDING' })
-  status: string;
+  @Column({
+    type: 'enum',
+    enum: InstallmentStatus,
+    enumName: 'installments_status_enum', // ✅ coincide con el tipo real en PG
+    default: InstallmentStatus.PENDING,
+  })
+  status: InstallmentStatus;
 
   /**
    * Número de cuota dentro del plan (ej: 1, 2, 3, ...)
@@ -80,8 +109,8 @@ export class Installment {
   /**
    * Concepto de la cuota (ej: PERSONAL_FINANCING, PRENDARIO, etc.)
    */
-  @Column({ nullable: true })
-  concept: string;
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  concept: string | null;
 
   /**
    * Quién recibe el pago de esta cuota.
@@ -89,10 +118,11 @@ export class Installment {
    */
   @Column({
     type: 'enum',
-    enum: ['AGENCY', 'STUDIO'],
+    enum: InstallmentReceiver,
+    enumName: 'installments_receiver_enum', // ✅ coincide con el tipo real en PG
     nullable: true,
   })
-  receiver: 'AGENCY' | 'STUDIO' | null;
+  receiver: InstallmentReceiver | null;
 
   /**
    * Observaciones acumuladas por los distintos pagos

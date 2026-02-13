@@ -126,11 +126,25 @@ export class VehiclesController {
     return this.vehiclesService.update(id, dto);
   }
 
-  // ✅ Eliminar vehículo → requiere permiso
+  /**
+   * ✅ "Eliminar" vehículo (soft delete)
+   * Internamente desactiva (isActive=false) para no romper FKs (budget_reports, sales, etc.)
+   */
   @Delete(':id')
   @UseGuards(PermissionsGuard)
   @RequirePermissions('VEHICLE_DELETE')
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.vehiclesService.remove(id);
+  }
+
+  /**
+   * ♻️ Restaurar vehículo desactivado (opcional)
+   * Si querés, en frontend podés mostrar "Reactivar".
+   */
+  @Patch(':id/restore')
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('VEHICLE_EDIT')
+  restore(@Param('id', ParseIntPipe) id: number) {
+    return this.vehiclesService.restore(id);
   }
 }
