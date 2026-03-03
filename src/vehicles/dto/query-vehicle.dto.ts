@@ -23,6 +23,12 @@ export class QueryVehicleDto {
   @IsString()
   q?: string;
 
+  // ✅ NUEVO: categoría (CAR/MOTORCYCLE)
+  @IsOptional()
+  @IsString()
+  @IsIn(['CAR', 'MOTORCYCLE'])
+  category?: 'CAR' | 'MOTORCYCLE';
+
   // 🔹 Filtros por texto (si los usás)
   @IsOptional()
   @IsString()
@@ -94,7 +100,16 @@ export class QueryVehicleDto {
 
   // 🔹 Ordenamiento
   @IsOptional()
-  @IsIn(['createdAt', 'updatedAt', 'brand', 'model', 'year', 'price', 'status'])
+  @IsIn([
+    'createdAt',
+    'updatedAt',
+    'brand',
+    'model',
+    'year',
+    'price',
+    'status',
+    'category',
+  ])
   sortBy?:
     | 'createdAt'
     | 'updatedAt'
@@ -102,7 +117,8 @@ export class QueryVehicleDto {
     | 'model'
     | 'year'
     | 'price'
-    | 'status';
+    | 'status'
+    | 'category';
 
   @IsOptional()
   @IsIn(['ASC', 'DESC'])

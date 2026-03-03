@@ -13,6 +13,12 @@ export class CreateVehicleDto {
   @IsInt()
   versionId: number; // FK
 
+  // ✅ NUEVO: categoría (CAR/MOTORCYCLE)
+  @IsOptional()
+  @IsString()
+  @IsIn(['CAR', 'MOTORCYCLE'])
+  category?: 'CAR' | 'MOTORCYCLE';
+
   @IsInt()
   year: number;
 

@@ -12,8 +12,11 @@ import { Version } from '../versions/version.entity';
 import { Purchase } from '../purchases/purchase.entity';
 import { Sale } from '../sales/sale.entity';
 
+export type VehicleCategory = 'CAR' | 'MOTORCYCLE';
+
 @Entity({ name: 'vehicles' })
 @Index(['brand', 'model', 'versionName'])
+@Index(['category'])
 export class Vehicle {
   @PrimaryGeneratedColumn()
   id: number;
@@ -36,6 +39,12 @@ export class Vehicle {
     nullable: false,
   })
   version: Version;
+
+  // =========================
+  // Clasificación (Autos / Motos)
+  // =========================
+  @Column({ type: 'varchar', length: 20, default: 'CAR' })
+  category: VehicleCategory;
 
   // =========================
   // Estado / Soft delete

@@ -2,6 +2,7 @@
   Injectable,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DeepPartial } from 'typeorm';
@@ -37,14 +38,79 @@ export class BudgetsService {
     private readonly mailService: MailService,
   ) {}
 
-  async findAll(): Promise<Budget[]> {
-    return this.budgetsRepository.find({
-      relations: ['vehicle', 'client'],
-      order: { createdAt: 'DESC' },
-    });
+  // 🔐 Helper: categorías permitidas según permisos del usuario autenticado
+  // Soporta esquema legacy (VEHICLE_READ / VEHICLE_CREATE) y el nuevo scope por categoría
+  private getAllowedCategories(user: any): ('CAR' | 'MOTORCYCLE')[] {
+    const perms: string[] = user?.permissions || [];
+
+    const canCar =
+      perms.includes('VEHICLE_READ') ||
+      perms.includes('VEHICLE_READ_CAR') ||
+      perms.includes('VEHICLE_CREATE') ||
+      perms.includes('VEHICLE_CREATE_CAR');
+
+    const canMoto =
+      perms.includes('VEHICLE_READ') ||
+      perms.includes('VEHICLE_READ_MOTORCYCLE') ||
+      perms.includes('VEHICLE_CREATE') ||
+      perms.includes('VEHICLE_CREATE_MOTORCYCLE');
+
+    const out: ('CAR' | 'MOTORCYCLE')[] = [];
+    if (canCar) out.push('CAR');
+    if (canMoto) out.push('MOTORCYCLE');
+    return out;
   }
 
-  async findOne(id: number): Promise<Budget> {
+  private assertCanAccessVehicleCategory(user: any, category: any) {
+    // compatibilidad: si category viene null/undefined, lo consideramos CAR
+    const normalized: 'CAR' | 'MOTORCYCLE' = (category || 'CAR') as any;
+    const allowed = this.getAllowedCategories(user);
+
+    if (!allowed.length) {
+      throw new ForbiddenException('No tenés permisos para acceder a vehículos.');
+    }
+
+    if (!allowed.includes(normalized)) {
+      throw new ForbiddenException(
+        'No tenés permiso para operar con este tipo de vehículo',
+      );
+    }
+  }
+
+  async findAll(user: any): Promise<Budget[]> {
+    const allowed = this.getAllowedCategories(user);
+    if (!allowed.length) {
+      throw new ForbiddenException('No tenés permisos para ver presupuestos.');
+    }
+
+    // Filtramos por categoría del vehículo (compatibilidad: null => CAR)
+    return this.budgetsRepository
+      .createQueryBuilder('b')
+      .leftJoinAndSelect('b.vehicle', 'vehicle')
+      .leftJoinAndSelect('b.client', 'client')
+      .where("COALESCE(vehicle.category, 'CAR') IN (:...allowed)", { allowed })
+      .orderBy('b.createdAt', 'DESC')
+      .getMany();
+  }
+
+  async findOne(id: number, user: any): Promise<Budget> {
+    const budget = await this.budgetsRepository.findOne({
+      where: { id },
+      relations: ['vehicle', 'client'],
+    });
+
+    if (!budget) {
+      throw new NotFoundException(`Presupuesto con id ${id} no encontrado`);
+    }
+
+    this.assertCanAccessVehicleCategory(user, (budget as any)?.vehicle?.category);
+
+    return budget;
+  }
+
+  // 🔒 Uso interno (PDF / update / remove). No aplica control por categoría.
+  // En endpoints protegidos, el controller debe llamar a findOne(id, req.user).
+  private async findOneInternal(id: number): Promise<Budget> {
     const budget = await this.budgetsRepository.findOne({
       where: { id },
       relations: ['vehicle', 'client'],
@@ -57,11 +123,14 @@ export class BudgetsService {
     return budget;
   }
 
-  async create(dto: any) {
+  async create(dto: any, user: any) {
     const vehicle = await this.vehiclesRepository.findOne({
       where: { id: dto.vehicleId, sold: false },
     });
     if (!vehicle) throw new BadRequestException('Vehículo no disponible');
+
+    // 🔐 Segregación por categoría (autos/motos)
+    this.assertCanAccessVehicleCategory(user, (vehicle as any)?.category);
 
     const client = await this.clientsRepository.findOne({
       where: { id: dto.clientId },
@@ -80,22 +149,22 @@ export class BudgetsService {
       dto.prendarioAmount != null
         ? Number(dto.prendarioAmount)
         : dto.montoPrendario != null
-        ? Number(dto.montoPrendario)
-        : 0;
+          ? Number(dto.montoPrendario)
+          : 0;
 
     const personalAmount =
       dto.personalAmount != null
         ? Number(dto.personalAmount)
         : dto.montoPersonal != null
-        ? Number(dto.montoPersonal)
-        : 0;
+          ? Number(dto.montoPersonal)
+          : 0;
 
     const financiacionAmount =
       dto.financiacionAmount != null
         ? Number(dto.financiacionAmount)
         : dto.montoFinanciacion != null
-        ? Number(dto.montoFinanciacion)
-        : 0;
+          ? Number(dto.montoFinanciacion)
+          : 0;
 
     // Normalizar nuevamente sobre dto.* para el resto de la lógica
     dto.prendarioAmount = prendarioAmount || null;
@@ -176,12 +245,12 @@ export class BudgetsService {
       installmentsCount <= 0
         ? null
         : installmentsCount <= 12
-        ? 12
-        : installmentsCount <= 24
-        ? 24
-        : installmentsCount <= 36
-        ? 36
-        : null;
+          ? 12
+          : installmentsCount <= 24
+            ? 24
+            : installmentsCount <= 36
+              ? 36
+              : null;
 
     // 🧮 Buscar tasas según el tipo de préstamo y meses del tramo
     const prendarioRate = bracketMonths
@@ -293,79 +362,38 @@ export class BudgetsService {
       });
     } catch (error) {
       console.error(
-        '❌ Error al crear BudgetReport para el presupuesto',
-        saved.id,
+        '❌ Error al crear BudgetReport (no bloquea presupuesto):',
         error,
       );
-      // No relanzamos el error para no impedir la creación del presupuesto
     }
 
-    // ✅ Opción B: enviar email SOLO al crear el presupuesto
+    // ✉️ Email (si viene email)
     try {
-      const clientEmail = (client as any)?.email;
-      if (clientEmail) {
-        const pdfBuffer = await this.getPdf(saved.id);
-
-        const vehicleLabel = vehicle
-          ? `${vehicle.brand} ${vehicle.model}${
-              vehicle.versionName ? ` ${vehicle.versionName}` : ''
-            }`
-          : 'Vehículo';
-
-        const html = `
-          <p>Hola ${client?.firstName ?? ''} ${client?.lastName ?? ''},</p>
-
-          <p>Te enviamos el presupuesto solicitado.</p>
-
-          <ul>
-            <li><strong>Presupuesto Nº:</strong> ${saved.id}</li>
-            <li><strong>Vehículo:</strong> ${vehicleLabel}</li>
-            <li><strong>Fecha:</strong> ${new Date(saved.createdAt).toLocaleDateString('es-AR')}</li>
-          </ul>
-
-          <p>Adjunto vas a encontrar el PDF del presupuesto.</p>
-
-          <p>
-            Saludos,<br/>
-            <strong>GL Motors</strong>
-          </p>
-        `;
-
-        await this.mailService.sendWithPdf({
-          to: clientEmail,
-          subject: `Presupuesto #${saved.id} - ${vehicleLabel}`,
-          filename: `Presupuesto-${saved.id}.pdf`,
-          pdfBuffer,
+      if (dto?.email) {
+        const html = `<p>Adjuntamos su presupuesto. N° ${saved.id}</p>`;
+        await this.mailService.sendMail({
+          to: dto.email,
+          subject: `Presupuesto #${saved.id}`,
           html,
         });
-
-        console.log('✅ Presupuesto enviado por email a:', clientEmail);
-      } else {
-        console.warn(
-          `⚠️ El cliente del presupuesto ${saved.id} no tiene email cargado.`,
-        );
       }
-    } catch (err) {
-      console.error(
-        `❌ No se pudo enviar el presupuesto ${saved.id} por email (el presupuesto se creó igual):`,
-        err,
-      );
+    } catch (error) {
+      console.error('❌ Error enviando email (no bloquea):', error);
     }
 
     return saved;
   }
 
   async update(id: number, dto: any) {
-    const budget = await this.findOne(id);
+    const budget = await this.findOneInternal(id);
 
-    if (dto.status) {
-      budget.status = dto.status;
-    }
-
+    if (dto.status !== undefined) budget.status = dto.status;
     if (dto.paymentType !== undefined) budget.paymentType = dto.paymentType;
     if (dto.installments !== undefined) budget.installments = dto.installments;
+
     if (dto.downPayment !== undefined) budget.downPayment = dto.downPayment;
     if (dto.tradeInValue !== undefined) budget.tradeInValue = dto.tradeInValue;
+
     if (dto.prendarioAmount !== undefined)
       budget.prendarioAmount = dto.prendarioAmount;
     if (dto.personalAmount !== undefined)
@@ -392,14 +420,14 @@ export class BudgetsService {
   }
 
   async remove(id: number) {
-    const budget = await this.findOne(id);
+    const budget = await this.findOneInternal(id);
     return this.budgetsRepository.remove(budget);
   }
 
   // 🖨️ Generar PDF similar al de venta pero para presupuesto
   // ✅ Opción B: getPdf SOLO GENERA el PDF. NO envía email.
   async getPdf(id: number): Promise<Buffer> {
-    const budget = await this.findOne(id);
+    const budget = await this.findOneInternal(id);
 
     const dir = path.join(__dirname, '../../uploads/budgets', String(budget.id));
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -491,17 +519,13 @@ export class BudgetsService {
     if (hasLoans) {
       sectionTitle('Detalle de Préstamos y Financiaciones');
 
-      const calcConInteres = (
-        montoNeto?: number | null,
-        tasa?: number | null,
-      ) => {
+      const calcConInteres = (montoNeto?: number | null, tasa?: number | null) => {
         if (!montoNeto) return 0;
         if (!tasa) return montoNeto;
         return montoNeto * (1 + tasa / 100);
       };
 
       if (budget.prendarioAmount != null) {
-        const montoNeto = budget.prendarioAmount;
         const montoConInteres = calcConInteres(
           budget.prendarioAmount,
           budget.prendarioRate,
@@ -523,7 +547,6 @@ export class BudgetsService {
       }
 
       if (budget.personalAmount != null) {
-        const montoNeto = budget.personalAmount;
         const montoConInteres = calcConInteres(
           budget.personalAmount,
           budget.personalRate,
@@ -545,7 +568,6 @@ export class BudgetsService {
       }
 
       if (budget.financiacionAmount != null) {
-        const montoNeto = budget.financiacionAmount;
         const montoConInteres = calcConInteres(
           budget.financiacionAmount,
           budget.financiacionRate,
@@ -570,27 +592,17 @@ export class BudgetsService {
     // Cliente
     if (budget.client) {
       sectionTitle('Cliente');
-      doc.text(
-        `Nombre: ${budget.client.firstName} ${budget.client.lastName}`,
-      );
-      if ((budget.client as any).dni) {
-        doc.text(`DNI: ${(budget.client as any).dni}`);
-      }
-      if ((budget.client as any).email) {
-        doc.text(`Email: ${(budget.client as any).email}`);
-      }
-      if ((budget.client as any).phone) {
-        doc.text(`Teléfono: ${(budget.client as any).phone}`);
-      }
+      doc.text(`Nombre: ${budget.client.firstName} ${budget.client.lastName}`);
+      if ((budget.client as any).dni) doc.text(`DNI: ${(budget.client as any).dni}`);
+      if ((budget.client as any).email) doc.text(`Email: ${(budget.client as any).email}`);
+      if ((budget.client as any).phone) doc.text(`Teléfono: ${(budget.client as any).phone}`);
     }
 
     // Vehículo
     if (budget.vehicle) {
       sectionTitle('Vehículo');
       doc.text(
-        `${budget.vehicle.brand} ${budget.vehicle.model} ${
-          budget.vehicle.versionName || ''
-        }`,
+        `${budget.vehicle.brand} ${budget.vehicle.model} ${budget.vehicle.versionName || ''}`,
       );
       if (budget.vehicle.year) doc.text(`Año: ${budget.vehicle.year}`);
       if (budget.vehicle.color) doc.text(`Color: ${budget.vehicle.color}`);

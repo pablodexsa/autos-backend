@@ -1,4 +1,8 @@
-﻿import { Injectable, NotFoundException } from '@nestjs/common';
+﻿import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import { Sale } from './sale.entity';
@@ -36,11 +40,57 @@ export class SalesService {
     private readonly mailService: MailService, // ✅ NUEVO
   ) {}
 
-  // 🔍 Vehículos disponibles o reservados por DNI
-  async eligibleVehiclesForDni(dni?: string) {
-    const available = await this.vehicleRepo.find({
+  // 🔐 Helper: categorías permitidas según permisos del usuario (legacy + scoped)
+  private getAllowedCategories(user: any): ('CAR' | 'MOTORCYCLE')[] {
+    const perms: string[] = user?.permissions || [];
+
+    const canCar =
+      perms.includes('VEHICLE_READ') ||
+      perms.includes('VEHICLE_READ_CAR') ||
+      perms.includes('VEHICLE_CREATE') ||
+      perms.includes('VEHICLE_CREATE_CAR');
+
+    const canMoto =
+      perms.includes('VEHICLE_READ') ||
+      perms.includes('VEHICLE_READ_MOTORCYCLE') ||
+      perms.includes('VEHICLE_CREATE') ||
+      perms.includes('VEHICLE_CREATE_MOTORCYCLE');
+
+    const out: ('CAR' | 'MOTORCYCLE')[] = [];
+    if (canCar) out.push('CAR');
+    if (canMoto) out.push('MOTORCYCLE');
+    return out;
+  }
+
+  private assertCanAccessVehicleCategory(user: any, category: any) {
+    const normalized: 'CAR' | 'MOTORCYCLE' = (category || 'CAR') as any;
+    const allowed = this.getAllowedCategories(user);
+
+    if (!allowed.length) {
+      throw new ForbiddenException('No tenés permisos para acceder a ventas.');
+    }
+
+    if (!allowed.includes(normalized)) {
+      throw new ForbiddenException(
+        'No tenés permiso para operar con este tipo de vehículo',
+      );
+    }
+  }
+
+  // 🔍 Vehículos disponibles o reservados por DNI (FILTRADO por categoría)
+  async eligibleVehiclesForDni(user: any, dni?: string) {
+    const allowed = this.getAllowedCategories(user);
+    if (!allowed.length) {
+      throw new ForbiddenException('No tenés permisos para acceder a vehículos.');
+    }
+
+    const availableAll = await this.vehicleRepo.find({
       where: { status: In(['Available', 'available']) },
     });
+
+    const available = availableAll.filter((v: any) =>
+      allowed.includes(((v as any).category || 'CAR') as any),
+    );
 
     if (!dni) return available;
 
@@ -53,16 +103,23 @@ export class SalesService {
       relations: ['vehicle', 'client'],
     });
 
-    const reservedVehicles = acceptedRes.map((r) => r.vehicle).filter(Boolean);
+    const reservedVehiclesAll = acceptedRes.map((r) => r.vehicle).filter(Boolean);
+    const reservedVehicles = reservedVehiclesAll.filter((v: any) =>
+      allowed.includes(((v as any).category || 'CAR') as any),
+    );
+
     const map = new Map<number, Vehicle>();
     for (const v of [...available, ...reservedVehicles]) map.set(v.id, v);
     return Array.from(map.values());
   }
 
-  // 🧾 Crear nueva venta
-  async create(dto: CreateSaleDto, sellerId?: number, sellerName?: string) {
+  // 🧾 Crear nueva venta (VALIDA categoría)
+  async create(dto: CreateSaleDto, user: any, sellerId?: number, sellerName?: string) {
     const vehicle = await this.vehicleRepo.findOne({ where: { id: dto.vehicleId } });
     if (!vehicle) throw new NotFoundException('Vehicle not found');
+
+    // 🔐 Blindaje por categoría (autos/motos)
+    this.assertCanAccessVehicleCategory(user, (vehicle as any)?.category);
 
     const client = await this.clientRepo.findOne({ where: { dni: dto.clientDni } });
 
@@ -222,16 +279,37 @@ export class SalesService {
     return saved;
   }
 
-  // 📋 Listar todas las ventas
-  async findAll() {
-    return this.salesRepo.find({
-      order: { createdAt: 'DESC' },
-      relations: ['vehicle', 'client'],
-    });
+  // 📋 Listar todas las ventas (FILTRADO por categoría)
+  async findAll(user: any) {
+    const allowed = this.getAllowedCategories(user);
+    if (!allowed.length) {
+      throw new ForbiddenException('No tenés permisos para ver ventas.');
+    }
+
+    return this.salesRepo
+      .createQueryBuilder('sale')
+      .leftJoinAndSelect('sale.vehicle', 'vehicle')
+      .leftJoinAndSelect('sale.client', 'client')
+      .where("COALESCE(vehicle.category, 'CAR') IN (:...allowed)", { allowed })
+      .orderBy('sale.createdAt', 'DESC')
+      .getMany();
   }
 
-  // 🔎 Buscar una venta
-  async findOne(id: number) {
+  // 🔎 Buscar una venta (VALIDA categoría)
+  async findOne(id: number, user: any) {
+    const sale = await this.salesRepo.findOne({
+      where: { id },
+      relations: ['vehicle', 'client'],
+    });
+    if (!sale) throw new NotFoundException('Sale not found');
+
+    this.assertCanAccessVehicleCategory(user, (sale as any)?.vehicle?.category);
+
+    return sale;
+  }
+
+  // 🔒 Uso interno (PDF). No aplica control por categoría.
+  private async findOneInternal(id: number) {
     const sale = await this.salesRepo.findOne({
       where: { id },
       relations: ['vehicle', 'client'],
@@ -271,7 +349,7 @@ export class SalesService {
 
   // 🖨️ Generar comprobante de venta profesional (SOLO GENERA, NO ENVÍA EMAIL)
   async getPdf(id: number): Promise<Buffer> {
-    const sale = await this.findOne(id);
+    const sale = await this.findOneInternal(id);
 
     const dir = path.join(__dirname, '../../uploads/sales', String(sale.id));
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -337,9 +415,7 @@ export class SalesService {
     // 📋 Datos de la venta
     sectionTitle('Datos de la Venta');
     doc.text(`Número: ${sale.id}`);
-    doc.text(
-      `Fecha: ${new Date(sale.createdAt).toLocaleDateString('es-AR')}`,
-    );
+    doc.text(`Fecha: ${new Date(sale.createdAt).toLocaleDateString('es-AR')}`);
     doc.text(
       `Forma de Pago: ${this.labelPayment(sale.paymentComposition) || '-'}`,
     );
@@ -354,8 +430,7 @@ export class SalesService {
       doc.text(`Anticipo: ${formatPesos(sale.downPayment)}`);
     if (sale.tradeInValue != null)
       doc.text(`Valor de Permuta: ${formatPesos(sale.tradeInValue)}`);
-    if (sale.basePrice != null)
-      doc.text(`Precio Lista: ${formatPesos(sale.basePrice)}`);
+    if (sale.basePrice != null) doc.text(`Precio Lista: ${formatPesos(sale.basePrice)}`);
     if (sale.balance != null)
       doc.text(`Saldo (vehículo - permuta): ${formatPesos(sale.balance)}`);
     if (sale.finalPrice != null)
@@ -430,9 +505,7 @@ export class SalesService {
         doc.text(`Cuotas: ${sale.prendarioInstallments ?? '-'}`);
         if (prendarioConInteres > 0 && nPrendario > 0) {
           const cuota = prendarioConInteres / nPrendario;
-          doc.text(
-            `Valor de cada cuota (con financiación): ${formatPesos(cuota)}`,
-          );
+          doc.text(`Valor de cada cuota (con financiación): ${formatPesos(cuota)}`);
         }
       }
 
@@ -447,9 +520,7 @@ export class SalesService {
         doc.text(`Cuotas: ${sale.personalInstallments ?? '-'}`);
         if (personalConInteres > 0 && nPersonal > 0) {
           const cuota = personalConInteres / nPersonal;
-          doc.text(
-            `Valor de cada cuota (con financiación): ${formatPesos(cuota)}`,
-          );
+          doc.text(`Valor de cada cuota (con financiación): ${formatPesos(cuota)}`);
         }
       }
 
@@ -464,9 +535,7 @@ export class SalesService {
         doc.text(`Cuotas: ${sale.inHouseInstallments ?? '-'}`);
         if (financiacionConInteres > 0 && nFinanc > 0) {
           const cuota = financiacionConInteres / nFinanc;
-          doc.text(
-            `Valor de cada cuota (con financiación): ${formatPesos(cuota)}`,
-          );
+          doc.text(`Valor de cada cuota (con financiación): ${formatPesos(cuota)}`);
         }
       }
 
@@ -484,9 +553,7 @@ export class SalesService {
         doc.text(`Cantidad de Cuotas: ${sale.inHouseInstallments}`);
 
         const baseFin =
-          financiacionConInteres > 0
-            ? financiacionConInteres
-            : sale.inHouseAmount;
+          financiacionConInteres > 0 ? financiacionConInteres : sale.inHouseAmount;
         const valorCuota = baseFin / sale.inHouseInstallments;
 
         doc.text(`Valor de cada cuota: ${formatPesos(valorCuota)}`);
@@ -502,9 +569,7 @@ export class SalesService {
     if (sale.vehicle) {
       sectionTitle('Vehículo');
       doc.text(
-        `${sale.vehicle.brand} ${sale.vehicle.model} ${
-          sale.vehicle.versionName || ''
-        }`,
+        `${sale.vehicle.brand} ${sale.vehicle.model} ${sale.vehicle.versionName || ''}`,
       );
       if (sale.vehicle.year) doc.text(`Año: ${sale.vehicle.year}`);
       if (sale.vehicle.color) doc.text(`Color: ${sale.vehicle.color}`);

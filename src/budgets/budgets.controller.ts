@@ -9,6 +9,7 @@
   ParseIntPipe,
   Res,
   UseGuards,
+  Req,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { BudgetsService } from './budgets.service';
@@ -21,22 +22,22 @@ export class BudgetsController {
   // 📋 Listar todos los presupuestos (protegido)
   @UseGuards(JwtAuthGuard)
   @Get()
-  findAll() {
-    return this.budgetsService.findAll();
+  findAll(@Req() req: any) {
+    return this.budgetsService.findAll(req.user);
   }
 
   // 🔍 Obtener un presupuesto por ID (protegido)
   @UseGuards(JwtAuthGuard)
   @Get(':id')
-  findOne(@Param('id', ParseIntPipe) id: number) {
-    return this.budgetsService.findOne(id);
+  findOne(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
+    return this.budgetsService.findOne(id, req.user);
   }
 
   // 🧾 Crear nuevo presupuesto y devolver JSON (protegido)
   @UseGuards(JwtAuthGuard)
   @Post()
-  async create(@Body() dto: any) {
-    const savedBudget = await this.budgetsService.create(dto);
+  async create(@Body() dto: any, @Req() req: any) {
+    const savedBudget = await this.budgetsService.create(dto, req.user);
     return savedBudget; // se devuelve el registro guardado, no el PDF
   }
 

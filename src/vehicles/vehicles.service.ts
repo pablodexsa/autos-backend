@@ -1,7 +1,11 @@
-﻿import { Injectable, NotFoundException } from '@nestjs/common';
+﻿import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Vehicle } from './vehicle.entity';
+import { Vehicle, VehicleCategory } from './vehicle.entity';
 import { CreateVehicleDto } from './dto/create-vehicle.dto';
 import { UpdateVehicleDto } from './dto/update-vehicle.dto';
 import { QueryVehicleDto } from './dto/query-vehicle.dto';
@@ -9,6 +13,8 @@ import { Subject } from 'rxjs';
 import { Version } from '../versions/version.entity';
 import * as path from 'path';
 import * as fs from 'fs';
+
+type VehicleAction = 'READ' | 'CREATE' | 'EDIT' | 'DELETE';
 
 @Injectable()
 export class VehiclesService {
@@ -30,12 +36,111 @@ export class VehiclesService {
     this.updates$.next({ type, id });
   }
 
-  async create(dto: CreateVehicleDto) {
+  // ============================================================
+  // 🔐 Permisos por categoría (Autos/Motos) + compat legacy
+  // ============================================================
+
+  private getUserPermissionCodes(user: any): string[] {
+    return (
+      user?.role?.rolePermissions
+        ?.map((rp: any) => rp?.permission?.code)
+        .filter(Boolean) || []
+    );
+  }
+
+  private permissionCode(action: VehicleAction, category: VehicleCategory) {
+    // Ej: VEHICLE_READ_CAR, VEHICLE_EDIT_MOTORCYCLE, etc.
+    return `VEHICLE_${action}_${category}`;
+  }
+
+  private genericPermission(action: Exclude<VehicleAction, 'READ'>) {
+    // Permisos "legacy" existentes en tu BD: VEHICLE_CREATE / VEHICLE_EDIT / VEHICLE_DELETE
+    return `VEHICLE_${action}`;
+  }
+
+  private hasAnyScopedForCategory(
+    codes: string[],
+    category: VehicleCategory,
+  ): boolean {
+    return (
+      codes.includes(this.permissionCode('READ', category)) ||
+      codes.includes(this.permissionCode('CREATE', category)) ||
+      codes.includes(this.permissionCode('EDIT', category)) ||
+      codes.includes(this.permissionCode('DELETE', category))
+    );
+  }
+
+  private canReadCategory(codes: string[], category: VehicleCategory): boolean {
+    // READ explícito
+    if (codes.includes(this.permissionCode('READ', category))) return true;
+
+    // Si tiene cualquier permiso scoped de esa categoría, le permitimos leer
+    if (this.hasAnyScopedForCategory(codes, category)) return true;
+
+    // Fallback legacy: si tiene create/edit/delete genéricos, asumimos lectura
+    if (
+      codes.includes(this.genericPermission('CREATE')) ||
+      codes.includes(this.genericPermission('EDIT')) ||
+      codes.includes(this.genericPermission('DELETE'))
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  private assertCan(user: any, action: VehicleAction, category: VehicleCategory) {
+    const codes = this.getUserPermissionCodes(user);
+
+    // READ tiene reglas propias (incluye fallback)
+    if (action === 'READ') {
+      if (this.canReadCategory(codes, category)) return;
+      throw new ForbiddenException(
+        `No tiene permisos para ver ${category === 'CAR' ? 'autos' : 'motos'}`,
+      );
+    }
+
+    const required = this.permissionCode(action, category);
+
+    // ✅ scoped por categoría
+    if (codes.includes(required)) return;
+
+    // ✅ fallback legacy (solo si el rol todavía usa VEHICLE_CREATE/EDIT/DELETE)
+    const legacy = this.genericPermission(action);
+    if (codes.includes(legacy)) return;
+
+    throw new ForbiddenException(
+      `No tiene permisos para ${action.toLowerCase()} ${
+        category === 'CAR' ? 'autos' : 'motos'
+      }`,
+    );
+  }
+
+  private allowedCategoriesForRead(user: any): VehicleCategory[] {
+    const codes = this.getUserPermissionCodes(user);
+    const allowed: VehicleCategory[] = [];
+
+    if (this.canReadCategory(codes, 'CAR')) allowed.push('CAR');
+    if (this.canReadCategory(codes, 'MOTORCYCLE')) allowed.push('MOTORCYCLE');
+
+    return allowed;
+  }
+
+  // ============================================================
+  // ✅ CRUD
+  // ============================================================
+
+  async create(user: any, dto: CreateVehicleDto) {
     const version = await this.versionRepo.findOne({
       where: { id: dto.versionId },
       relations: ['model', 'model.brand'],
     });
     if (!version) throw new NotFoundException('Version not found');
+
+    const category = (dto.category ?? 'CAR') as VehicleCategory;
+
+    // 🔐 permiso por categoría
+    this.assertCan(user, 'CREATE', category);
 
     const v = this.repo.create({
       version,
@@ -43,8 +148,8 @@ export class VehiclesService {
       model: version.model.name,
       versionName: version.name,
       year: dto.year,
+      category,
 
-      // ✅ NUEVOS CAMPOS
       kilometraje: dto.kilometraje ?? null,
       concesionaria: dto.concesionaria ?? null,
       procedencia: dto.procedencia ?? null,
@@ -56,7 +161,6 @@ export class VehiclesService {
       price: dto.price,
       status: dto.status,
 
-      // ✅ Soft delete: por defecto activo
       isActive: true,
     });
 
@@ -65,8 +169,14 @@ export class VehiclesService {
     return saved;
   }
 
-  async findAll(q: QueryVehicleDto) {
+  async findAll(user: any, q: QueryVehicleDto) {
+    const allowed = this.allowedCategoriesForRead(user);
+    if (allowed.length === 0) {
+      throw new ForbiddenException('No tiene permisos para ver vehículos');
+    }
+
     const {
+      category,
       brandId,
       modelId,
       versionId,
@@ -78,8 +188,6 @@ export class VehiclesService {
       yearMax,
       priceMin,
       priceMax,
-
-      // ✅ NUEVO FILTRO
       concesionaria,
 
       page = 1,
@@ -88,21 +196,34 @@ export class VehiclesService {
       sortOrder = 'DESC',
     } = q;
 
+    // Si el user pidió category explícito, debe estar permitido
+    if (category && !allowed.includes(category as VehicleCategory)) {
+      throw new ForbiddenException(
+        `No tiene permisos para ver ${category === 'CAR' ? 'autos' : 'motos'}`,
+      );
+    }
+
     const qb = this.repo
       .createQueryBuilder('v')
       .leftJoinAndSelect('v.version', 'ver')
       .leftJoinAndSelect('ver.model', 'm')
       .leftJoinAndSelect('m.brand', 'b');
 
-    // ✅ Soft delete: traer solo activos por defecto
     qb.andWhere('v.isActive = true');
 
-    // 🔹 Filtros por relación
+    // 🔐 Filtro por categorías permitidas
+    if (category) {
+      qb.andWhere('v.category = :category', { category });
+    } else {
+      qb.andWhere('v.category IN (:...allowed)', { allowed });
+    }
+
+    // Filtros por relación
     if (brandId) qb.andWhere('b.id = :brandId', { brandId });
     if (modelId) qb.andWhere('m.id = :modelId', { modelId });
     if (versionId) qb.andWhere('ver.id = :versionId', { versionId });
 
-    // 🔹 Filtros básicos
+    // Filtros básicos
     if (color) {
       qb.andWhere('LOWER(v.color) LIKE :color', {
         color: `%${color.toLowerCase()}%`,
@@ -120,7 +241,6 @@ export class VehiclesService {
     if (priceMin) qb.andWhere('v.price >= :priceMin', { priceMin });
     if (priceMax) qb.andWhere('v.price <= :priceMax', { priceMax });
 
-    // ✅ filtro por Concesionaria
     if (concesionaria) {
       qb.andWhere('v.concesionaria = :concesionaria', { concesionaria });
     }
@@ -132,7 +252,7 @@ export class VehiclesService {
       );
     }
 
-    // 🔹 Filtro de disponibilidad (compatibilidad total)
+    // Disponibilidad (compatibilidad)
     if (status) {
       qb.andWhere('LOWER(v.status) = LOWER(:status)', { status });
     } else {
@@ -141,8 +261,9 @@ export class VehiclesService {
       });
     }
 
-    // 🔹 Orden y paginación (proteger sortBy para evitar SQL injection)
+    // Orden y paginación
     const allowedSort = new Set([
+      'category',
       'createdAt',
       'updatedAt',
       'year',
@@ -158,7 +279,8 @@ export class VehiclesService {
       'procedencia',
     ]);
     const safeSortBy = allowedSort.has(sortBy) ? sortBy : 'createdAt';
-    const safeSortOrder = String(sortOrder).toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+    const safeSortOrder =
+      String(sortOrder).toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
     qb.orderBy(`v.${safeSortBy}`, safeSortOrder as any)
       .skip((page - 1) * limit)
@@ -168,17 +290,32 @@ export class VehiclesService {
     return { items, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
-  async findOne(id: number) {
+  async findOne(user: any, id: number) {
     const v = await this.repo.findOne({
       where: { id, isActive: true },
       relations: ['version', 'version.model', 'version.model.brand'],
     });
     if (!v) throw new NotFoundException('Vehicle not found');
+
+    this.assertCan(user, 'READ', v.category);
     return v;
   }
 
-  async update(id: number, dto: UpdateVehicleDto) {
-    const v = await this.findOne(id);
+  async update(user: any, id: number, dto: UpdateVehicleDto) {
+    const v = await this.repo.findOne({
+      where: { id, isActive: true },
+      relations: ['version', 'version.model', 'version.model.brand'],
+    });
+    if (!v) throw new NotFoundException('Vehicle not found');
+
+    // 🔐 (vendedor/vendedor_autos/vendedor_motos NO tendrán EDIT, así que se bloquea)
+    this.assertCan(user, 'EDIT', v.category);
+
+    const nextCategory = (dto.category ?? v.category) as VehicleCategory;
+    if (nextCategory !== v.category) {
+      this.assertCan(user, 'EDIT', nextCategory);
+      v.category = nextCategory;
+    }
 
     if (dto.versionId) {
       const version = await this.versionRepo.findOne({
@@ -194,7 +331,6 @@ export class VehiclesService {
 
     if (dto.year !== undefined) v.year = dto.year;
 
-    // ✅ NUEVOS CAMPOS
     if (dto.kilometraje !== undefined) v.kilometraje = dto.kilometraje ?? null;
     if (dto.concesionaria !== undefined)
       v.concesionaria = dto.concesionaria ?? null;
@@ -212,53 +348,48 @@ export class VehiclesService {
     return saved;
   }
 
-  /**
-   * 🗑️ "Eliminar" (soft delete): desactiva el vehículo para no romper FKs (budget_reports, sales, etc.)
-   */
-  async remove(id: number) {
+  async remove(user: any, id: number) {
     const v = await this.repo.findOne({ where: { id } });
     if (!v) throw new NotFoundException('Vehicle not found');
 
-    if (v.isActive === false) {
-      return { id, ok: true }; // idempotente
-    }
+    // 🔐 (vendedores no tendrán DELETE)
+    this.assertCan(user, 'DELETE', v.category);
+
+    if (v.isActive === false) return { id, ok: true };
 
     await this.repo.update(id, { isActive: false });
     this.notify('deleted', id);
     return { id, ok: true };
   }
 
-  /**
-   * ♻️ Restaurar vehículo desactivado (opcional, pero útil)
-   */
-  async restore(id: number) {
+  async restore(user: any, id: number) {
     const v = await this.repo.findOne({ where: { id } });
     if (!v) throw new NotFoundException('Vehicle not found');
 
-    if (v.isActive === true) {
-      return { id, ok: true }; // idempotente
-    }
+    // restore = EDIT
+    this.assertCan(user, 'EDIT', v.category);
+
+    if (v.isActive === true) return { id, ok: true };
 
     await this.repo.update(id, { isActive: true });
     this.notify('updated', id);
     return { id, ok: true };
   }
 
-  // 📁 Asociar documentación al vehículo (ruta relativa dentro de /uploads)
-  async attachDocumentation(id: number, relativePath: string) {
-    // permitimos adjuntar documentación a activos (y si querés también a inactivos)
+  async attachDocumentation(user: any, id: number, relativePath: string) {
     const vehicle = await this.repo.findOne({ where: { id, isActive: true } });
-    if (!vehicle) {
-      throw new NotFoundException(`Vehicle ${id} not found`);
-    }
+    if (!vehicle) throw new NotFoundException(`Vehicle ${id} not found`);
+
+    this.assertCan(user, 'EDIT', vehicle.category);
+
     vehicle.documentationPath = relativePath;
     const saved = await this.repo.save(vehicle);
     this.notify('updated', saved.id);
     return saved;
   }
 
-  // 📁 Obtener ruta absoluta + nombre de archivo de la documentación
   async getDocumentationPath(
+    user: any,
     id: number,
   ): Promise<{ absPath: string; filename: string }> {
     const vehicle = await this.repo.findOne({ where: { id, isActive: true } });
@@ -268,7 +399,8 @@ export class VehiclesService {
       );
     }
 
-    // La documentationPath es relativa a /uploads (por ejemplo: "vehicle-docs/archivo.pdf")
+    this.assertCan(user, 'READ', vehicle.category);
+
     const absPath = path.join(
       process.cwd(),
       'uploads',

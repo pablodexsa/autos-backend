@@ -14,6 +14,7 @@
   NotFoundException,
   Sse,
   UseGuards,
+  Req,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
@@ -28,8 +29,6 @@ import { UpdateVehicleDto } from './dto/update-vehicle.dto';
 import { QueryVehicleDto } from './dto/query-vehicle.dto';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { PermissionsGuard } from '../auth/permissions.guard';
-import { RequirePermissions } from '../auth/permissions.decorator';
 
 @UseGuards(JwtAuthGuard) // ✅ auth para todo el controller
 @Controller('vehicles')
@@ -67,12 +66,14 @@ export class VehiclesController {
   async uploadDocumentation(
     @Param('id', ParseIntPipe) id: number,
     @UploadedFile() file: Express.Multer.File,
+    @Req() req: any,
   ) {
     if (!file) {
       throw new NotFoundException('No se adjuntó ningún archivo');
     }
     const relativePath = path.join('vehicle-docs', file.filename);
     const updated = await this.vehiclesService.attachDocumentation(
+      req.user,
       id,
       relativePath,
     );
@@ -86,9 +87,10 @@ export class VehiclesController {
   async downloadDocumentation(
     @Param('id', ParseIntPipe) id: number,
     @Res() res: express.Response,
+    @Req() req: any,
   ) {
     const { absPath, filename } =
-      await this.vehiclesService.getDocumentationPath(id);
+      await this.vehiclesService.getDocumentationPath(req.user, id);
     return res.download(absPath, filename);
   }
 
@@ -96,55 +98,50 @@ export class VehiclesController {
   // CRUD VEHÍCULOS
   // ============================
 
-  // ✅ Nuevo vehículo → requiere permiso
+  // ✅ Crear (valida permisos por category dentro del service)
   @Post()
-  @UseGuards(PermissionsGuard)
-  @RequirePermissions('VEHICLE_CREATE')
-  create(@Body() dto: CreateVehicleDto) {
-    return this.vehiclesService.create(dto);
+  create(@Body() dto: CreateVehicleDto, @Req() req: any) {
+    return this.vehiclesService.create(req.user, dto);
   }
 
-  // ✅ Listado (sin permiso por ahora)
+  // ✅ Listado (filtra por categorías permitidas dentro del service)
   @Get()
-  findAll(@Query() q: QueryVehicleDto) {
+  findAll(@Query() q: QueryVehicleDto, @Req() req: any) {
     q.page = q.page && Number(q.page) > 0 ? Number(q.page) : 1;
     q.limit = q.limit && Number(q.limit) > 0 ? Number(q.limit) : 10;
-    return this.vehiclesService.findAll(q);
+    return this.vehiclesService.findAll(req.user, q);
   }
 
-  // ✅ Detalle (sin permiso por ahora)
+  // ✅ Detalle (valida que el user pueda ver esa categoría dentro del service)
   @Get(':id')
-  findOne(@Param('id', ParseIntPipe) id: number) {
-    return this.vehiclesService.findOne(id);
+  findOne(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
+    return this.vehiclesService.findOne(req.user, id);
   }
 
-  // ✅ Editar vehículo → requiere permiso
+  // ✅ Editar (valida permisos por categoría dentro del service)
   @Patch(':id')
-  @UseGuards(PermissionsGuard)
-  @RequirePermissions('VEHICLE_EDIT')
-  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateVehicleDto) {
-    return this.vehiclesService.update(id, dto);
+  update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateVehicleDto,
+    @Req() req: any,
+  ) {
+    return this.vehiclesService.update(req.user, id, dto);
   }
 
   /**
    * ✅ "Eliminar" vehículo (soft delete)
-   * Internamente desactiva (isActive=false) para no romper FKs (budget_reports, sales, etc.)
+   * Internamente desactiva (isActive=false) para no romper FKs.
    */
   @Delete(':id')
-  @UseGuards(PermissionsGuard)
-  @RequirePermissions('VEHICLE_DELETE')
-  remove(@Param('id', ParseIntPipe) id: number) {
-    return this.vehiclesService.remove(id);
+  remove(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
+    return this.vehiclesService.remove(req.user, id);
   }
 
   /**
    * ♻️ Restaurar vehículo desactivado (opcional)
-   * Si querés, en frontend podés mostrar "Reactivar".
    */
   @Patch(':id/restore')
-  @UseGuards(PermissionsGuard)
-  @RequirePermissions('VEHICLE_EDIT')
-  restore(@Param('id', ParseIntPipe) id: number) {
-    return this.vehiclesService.restore(id);
+  restore(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
+    return this.vehiclesService.restore(req.user, id);
   }
 }
