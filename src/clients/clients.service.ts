@@ -99,26 +99,52 @@ export class ClientsService {
   // 📄 DNI ADJUNTO
   // ============================
 
-  // 📄 Asociar DNI al cliente (ruta relativa dentro de /uploads)
-  async attachDni(id: number, relativePath: string): Promise<Client> {
+  /**
+   * Guarda en DB el DNI del cliente.
+   * - Nuevo (Cloudinary): dniPath = "https://..."
+   * - Legacy (filesystem): dniPath = "client-dni/archivo.pdf"
+   */
+  async attachDni(id: number, dniPathOrUrl: string): Promise<Client> {
     const client = await this.clientsRepository.findOne({ where: { id } });
-    if (!client) {
-      throw new NotFoundException(`Client ${id} not found`);
-    }
+    if (!client) throw new NotFoundException(`Client ${id} not found`);
 
-    client.dniPath = relativePath;
+    client.dniPath = dniPathOrUrl;
     return this.clientsRepository.save(client);
   }
 
-  // 📄 Obtener ruta absoluta + nombre de archivo del DNI adjunto
+  /**
+   * Si el dniPath es una URL (Cloudinary), la devuelve.
+   * Si es null o legacy path, devuelve null.
+   */
+  async getDniUrlIfAny(id: number): Promise<string | null> {
+    const client = await this.clientsRepository.findOne({ where: { id } });
+    if (!client || !client.dniPath) return null;
+
+    const p = String(client.dniPath);
+    if (p.startsWith('http://') || p.startsWith('https://')) return p;
+
+    return null;
+  }
+
+  /**
+   * Legacy: resuelve DNI en filesystem local.
+   * En Render Free esto puede fallar porque el disco es efímero.
+   */
   async getDniPath(id: number): Promise<{ absPath: string; filename: string }> {
     const client = await this.clientsRepository.findOne({ where: { id } });
     if (!client || !client.dniPath) {
       throw new NotFoundException('DNI no encontrado para este cliente');
     }
 
+    const p = String(client.dniPath);
+
+    // Si ya es URL, este método no aplica
+    if (p.startsWith('http://') || p.startsWith('https://')) {
+      throw new NotFoundException('DNI no encontrado en el servidor (URL)');
+    }
+
     // dniPath es relativa a /uploads (ej: "client-dni/archivo.pdf")
-    const absPath = path.join(process.cwd(), 'uploads', client.dniPath);
+    const absPath = path.join(process.cwd(), 'uploads', p);
     const filename = path.basename(absPath);
 
     if (!fs.existsSync(absPath)) {

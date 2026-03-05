@@ -21,19 +21,21 @@ import { UpdateClientDto } from './dto/update-client.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import * as path from 'path';
+import { memoryStorage } from 'multer';
 import * as express from 'express';
 
 import { PermissionsGuard } from '../auth/permissions.guard';
 import { RequirePermissions } from '../auth/permissions.decorator';
+import { CloudinaryService } from '../common/cloudinary/cloudinary.service';
 
-@UseGuards(JwtAuthGuard) // 👈 NECESARIO para que Auditoría tenga usuario
+@UseGuards(JwtAuthGuard)
 @Controller('clients')
 export class ClientsController {
-  constructor(private readonly clientsService: ClientsService) {}
+  constructor(
+    private readonly clientsService: ClientsService,
+    private readonly cloudinaryService: CloudinaryService,
+  ) {}
 
-  // ✅ Crear nuevo cliente (requiere permiso)
   @Post()
   @UseGuards(PermissionsGuard)
   @RequirePermissions('CLIENT_CREATE')
@@ -52,13 +54,11 @@ export class ClientsController {
     }
   }
 
-  // ✅ Listar todos los clientes (sin permiso por ahora)
   @Get()
   async findAll() {
     return this.clientsService.findAll();
   }
 
-  // ✅ Buscar cliente por DNI (autocompletado / búsqueda rápida) (sin permiso por ahora)
   @Get('search/by-dni')
   async searchByDni(@Query('dni') dni: string) {
     if (!dni || dni.trim() === '') {
@@ -68,21 +68,13 @@ export class ClientsController {
   }
 
   // ============================
-  // 📄 SUBIR DNI CLIENTE (sin permiso por ahora)
+  // 📄 SUBIR DNI CLIENTE (Cloudinary)
   // ============================
   @Post(':id/dni')
   @UseInterceptors(
     FileInterceptor('file', {
-      storage: diskStorage({
-        destination: path.join(process.cwd(), 'uploads', 'client-dni'),
-        filename: (req, file, cb) => {
-          const ext = path.extname(file.originalname);
-          const base = path.basename(file.originalname, ext);
-          const safeBase = base.replace(/[^a-zA-Z0-9-_]/g, '_');
-          const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-          cb(null, `${safeBase}-${unique}${ext}`);
-        },
-      }),
+      storage: memoryStorage(),
+      limits: { fileSize: 15 * 1024 * 1024 }, // 15MB
     }),
   )
   async uploadDni(
@@ -92,24 +84,36 @@ export class ClientsController {
     if (!file) {
       throw new NotFoundException('No se adjuntó ningún archivo');
     }
-    const relativePath = path.join('client-dni', file.filename);
-    const updated = await this.clientsService.attachDni(id, relativePath);
+
+    const uploaded = await this.cloudinaryService.uploadClientDni({
+      buffer: file.buffer,
+      originalName: file.originalname,
+      clientId: id,
+    });
+
+    const updated = await this.clientsService.attachDni(id, uploaded.url);
     return { ok: true, dniPath: updated.dniPath };
   }
 
   // ============================
-  // 📄 DESCARGAR DNI CLIENTE (sin permiso por ahora)
+  // 📄 DESCARGAR DNI CLIENTE
   // ============================
   @Get(':id/dni')
   async downloadDni(
     @Param('id', ParseIntPipe) id: number,
-    @Res() res: express.Response,
+    @Res({ passthrough: true }) res: express.Response,
   ) {
+    const url = await this.clientsService.getDniUrlIfAny(id);
+    if (url) {
+      res.redirect(url);
+      return;
+    }
+
+    // legacy: filesystem
     const { absPath, filename } = await this.clientsService.getDniPath(id);
-    return res.download(absPath, filename);
+    res.download(absPath, filename);
   }
 
-  // ✅ Obtener cliente por ID (sin permiso por ahora)
   @Get(':id')
   async findOne(@Param('id', ParseIntPipe) id: number) {
     const client = await this.clientsService.findOne(id);
@@ -119,7 +123,6 @@ export class ClientsController {
     return client;
   }
 
-  // ✅ Actualizar cliente (requiere permiso)
   @Put(':id')
   @UseGuards(PermissionsGuard)
   @RequirePermissions('CLIENT_EDIT')
@@ -135,7 +138,6 @@ export class ClientsController {
     }
   }
 
-  // ✅ Eliminar cliente (no lo pediste en la matriz; lo dejamos solo con auth)
   @Delete(':id')
   async remove(@Param('id', ParseIntPipe) id: number) {
     try {
