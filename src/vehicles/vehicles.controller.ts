@@ -17,8 +17,7 @@
   Req,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import * as path from 'path';
+import { memoryStorage } from 'multer';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import * as express from 'express';
@@ -29,11 +28,15 @@ import { UpdateVehicleDto } from './dto/update-vehicle.dto';
 import { QueryVehicleDto } from './dto/query-vehicle.dto';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { CloudinaryService } from '../common/cloudinary/cloudinary.service';
 
 @UseGuards(JwtAuthGuard) // ✅ auth para todo el controller
 @Controller('vehicles')
 export class VehiclesController {
-  constructor(private readonly vehiclesService: VehiclesService) {}
+  constructor(
+    private readonly vehiclesService: VehiclesService,
+    private readonly cloudinaryService: CloudinaryService,
+  ) {}
 
   // ============================
   // 🔄 STREAM (SSE) DE CAMBIOS
@@ -46,21 +49,13 @@ export class VehiclesController {
   }
 
   // ============================
-  // 📁 SUBIR DOCUMENTACIÓN VEHÍCULO
+  // 📁 SUBIR DOCUMENTACIÓN VEHÍCULO (Cloudinary)
   // ============================
   @Post(':id/documentation')
   @UseInterceptors(
     FileInterceptor('file', {
-      storage: diskStorage({
-        destination: path.join(process.cwd(), 'uploads', 'vehicle-docs'),
-        filename: (req, file, cb) => {
-          const ext = path.extname(file.originalname);
-          const base = path.basename(file.originalname, ext);
-          const safeBase = base.replace(/[^a-zA-Z0-9-_]/g, '_');
-          const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-          cb(null, `${safeBase}-${unique}${ext}`);
-        },
-      }),
+      storage: memoryStorage(),
+      limits: { fileSize: 20 * 1024 * 1024 }, // 20MB (ajustalo si querés)
     }),
   )
   async uploadDocumentation(
@@ -68,15 +63,20 @@ export class VehiclesController {
     @UploadedFile() file: Express.Multer.File,
     @Req() req: any,
   ) {
-    if (!file) {
-      throw new NotFoundException('No se adjuntó ningún archivo');
-    }
-    const relativePath = path.join('vehicle-docs', file.filename);
+    if (!file) throw new NotFoundException('No se adjuntó ningún archivo');
+
+    const uploaded = await this.cloudinaryService.uploadVehicleDoc({
+      buffer: file.buffer,
+      originalName: file.originalname,
+      vehicleId: id,
+    });
+
     const updated = await this.vehiclesService.attachDocumentation(
       req.user,
       id,
-      relativePath,
+      uploaded.url, // ✅ guardamos URL
     );
+
     return { ok: true, documentationPath: updated.documentationPath };
   }
 
@@ -86,12 +86,20 @@ export class VehiclesController {
   @Get(':id/documentation')
   async downloadDocumentation(
     @Param('id', ParseIntPipe) id: number,
-    @Res() res: express.Response,
+    @Res({ passthrough: true }) res: express.Response,
     @Req() req: any,
   ) {
+    const url = await this.vehiclesService.getDocumentationUrlIfAny(req.user, id);
+    if (url) {
+      res.redirect(url);
+      return;
+    }
+
+    // legacy: filesystem
     const { absPath, filename } =
       await this.vehiclesService.getDocumentationPath(req.user, id);
-    return res.download(absPath, filename);
+
+    res.download(absPath, filename);
   }
 
   // ============================

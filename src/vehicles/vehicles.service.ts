@@ -49,12 +49,10 @@ export class VehiclesService {
   }
 
   private permissionCode(action: VehicleAction, category: VehicleCategory) {
-    // Ej: VEHICLE_READ_CAR, VEHICLE_EDIT_MOTORCYCLE, etc.
     return `VEHICLE_${action}_${category}`;
   }
 
   private genericPermission(action: Exclude<VehicleAction, 'READ'>) {
-    // Permisos "legacy" existentes en tu BD: VEHICLE_CREATE / VEHICLE_EDIT / VEHICLE_DELETE
     return `VEHICLE_${action}`;
   }
 
@@ -71,13 +69,10 @@ export class VehiclesService {
   }
 
   private canReadCategory(codes: string[], category: VehicleCategory): boolean {
-    // READ explícito
     if (codes.includes(this.permissionCode('READ', category))) return true;
 
-    // Si tiene cualquier permiso scoped de esa categoría, le permitimos leer
     if (this.hasAnyScopedForCategory(codes, category)) return true;
 
-    // Fallback legacy: si tiene create/edit/delete genéricos, asumimos lectura
     if (
       codes.includes(this.genericPermission('CREATE')) ||
       codes.includes(this.genericPermission('EDIT')) ||
@@ -92,7 +87,6 @@ export class VehiclesService {
   private assertCan(user: any, action: VehicleAction, category: VehicleCategory) {
     const codes = this.getUserPermissionCodes(user);
 
-    // READ tiene reglas propias (incluye fallback)
     if (action === 'READ') {
       if (this.canReadCategory(codes, category)) return;
       throw new ForbiddenException(
@@ -102,10 +96,8 @@ export class VehiclesService {
 
     const required = this.permissionCode(action, category);
 
-    // ✅ scoped por categoría
     if (codes.includes(required)) return;
 
-    // ✅ fallback legacy (solo si el rol todavía usa VEHICLE_CREATE/EDIT/DELETE)
     const legacy = this.genericPermission(action);
     if (codes.includes(legacy)) return;
 
@@ -139,7 +131,6 @@ export class VehiclesService {
 
     const category = (dto.category ?? 'CAR') as VehicleCategory;
 
-    // 🔐 permiso por categoría
     this.assertCan(user, 'CREATE', category);
 
     const v = this.repo.create({
@@ -196,7 +187,6 @@ export class VehiclesService {
       sortOrder = 'DESC',
     } = q;
 
-    // Si el user pidió category explícito, debe estar permitido
     if (category && !allowed.includes(category as VehicleCategory)) {
       throw new ForbiddenException(
         `No tiene permisos para ver ${category === 'CAR' ? 'autos' : 'motos'}`,
@@ -211,19 +201,16 @@ export class VehiclesService {
 
     qb.andWhere('v.isActive = true');
 
-    // 🔐 Filtro por categorías permitidas
     if (category) {
       qb.andWhere('v.category = :category', { category });
     } else {
       qb.andWhere('v.category IN (:...allowed)', { allowed });
     }
 
-    // Filtros por relación
     if (brandId) qb.andWhere('b.id = :brandId', { brandId });
     if (modelId) qb.andWhere('m.id = :modelId', { modelId });
     if (versionId) qb.andWhere('ver.id = :versionId', { versionId });
 
-    // Filtros básicos
     if (color) {
       qb.andWhere('LOWER(v.color) LIKE :color', {
         color: `%${color.toLowerCase()}%`,
@@ -252,7 +239,6 @@ export class VehiclesService {
       );
     }
 
-    // Disponibilidad (compatibilidad)
     if (status) {
       qb.andWhere('LOWER(v.status) = LOWER(:status)', { status });
     } else {
@@ -261,7 +247,6 @@ export class VehiclesService {
       });
     }
 
-    // Orden y paginación
     const allowedSort = new Set([
       'category',
       'createdAt',
@@ -308,7 +293,6 @@ export class VehiclesService {
     });
     if (!v) throw new NotFoundException('Vehicle not found');
 
-    // 🔐 (vendedor/vendedor_autos/vendedor_motos NO tendrán EDIT, así que se bloquea)
     this.assertCan(user, 'EDIT', v.category);
 
     const nextCategory = (dto.category ?? v.category) as VehicleCategory;
@@ -352,7 +336,6 @@ export class VehiclesService {
     const v = await this.repo.findOne({ where: { id } });
     if (!v) throw new NotFoundException('Vehicle not found');
 
-    // 🔐 (vendedores no tendrán DELETE)
     this.assertCan(user, 'DELETE', v.category);
 
     if (v.isActive === false) return { id, ok: true };
@@ -366,7 +349,6 @@ export class VehiclesService {
     const v = await this.repo.findOne({ where: { id } });
     if (!v) throw new NotFoundException('Vehicle not found');
 
-    // restore = EDIT
     this.assertCan(user, 'EDIT', v.category);
 
     if (v.isActive === true) return { id, ok: true };
@@ -376,18 +358,47 @@ export class VehiclesService {
     return { id, ok: true };
   }
 
-  async attachDocumentation(user: any, id: number, relativePath: string) {
+  // ============================================================
+  // 📁 DOCUMENTACIÓN (Cloudinary + legacy filesystem)
+  // ============================================================
+
+  /**
+   * Guarda en DB la documentación del vehículo.
+   * - Nuevo (Cloudinary): documentationPath = "https://..."
+   * - Legacy (filesystem): documentationPath = "vehicle-docs/archivo.pdf"
+   */
+  async attachDocumentation(user: any, id: number, pathOrUrl: string) {
     const vehicle = await this.repo.findOne({ where: { id, isActive: true } });
     if (!vehicle) throw new NotFoundException(`Vehicle ${id} not found`);
 
     this.assertCan(user, 'EDIT', vehicle.category);
 
-    vehicle.documentationPath = relativePath;
+    vehicle.documentationPath = pathOrUrl;
     const saved = await this.repo.save(vehicle);
     this.notify('updated', saved.id);
     return saved;
   }
 
+  /**
+   * Si documentationPath es URL, devuelve la URL.
+   * Si es null o legacy path, devuelve null.
+   */
+  async getDocumentationUrlIfAny(user: any, id: number): Promise<string | null> {
+    const vehicle = await this.repo.findOne({ where: { id, isActive: true } });
+    if (!vehicle || !vehicle.documentationPath) return null;
+
+    this.assertCan(user, 'READ', vehicle.category);
+
+    const p = String(vehicle.documentationPath);
+    if (p.startsWith('http://') || p.startsWith('https://')) return p;
+
+    return null;
+  }
+
+  /**
+   * Legacy: resuelve documentación en filesystem local.
+   * En Render Free esto puede fallar porque el disco es efímero.
+   */
   async getDocumentationPath(
     user: any,
     id: number,
@@ -401,11 +412,13 @@ export class VehiclesService {
 
     this.assertCan(user, 'READ', vehicle.category);
 
-    const absPath = path.join(
-      process.cwd(),
-      'uploads',
-      vehicle.documentationPath,
-    );
+    const p = String(vehicle.documentationPath);
+
+    if (p.startsWith('http://') || p.startsWith('https://')) {
+      throw new NotFoundException('Documentación no encontrada en el servidor (URL)');
+    }
+
+    const absPath = path.join(process.cwd(), 'uploads', p);
     const filename = path.basename(absPath);
 
     if (!fs.existsSync(absPath)) {
