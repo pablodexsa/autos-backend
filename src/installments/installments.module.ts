@@ -6,7 +6,7 @@ import { Installment } from './installment.entity';
 import { InstallmentPayment } from '../installment-payments/installment-payment.entity';
 import { Sale } from '../sales/sale.entity';
 import { Client } from '../clients/entities/client.entity';
-import { AuditModule } from '../audit/audit.module'; // 👈 NUEVO
+import { AuditModule } from '../audit/audit.module';
 
 @Module({
   imports: [
@@ -16,7 +16,7 @@ import { AuditModule } from '../audit/audit.module'; // 👈 NUEVO
       Sale,
       Client,
     ]),
-    AuditModule, // 👈 SE AGREGA AQUÍ
+    AuditModule,
   ],
   controllers: [InstallmentsController],
   providers: [InstallmentsService],

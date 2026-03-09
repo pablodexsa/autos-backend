@@ -25,25 +25,18 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 export class InstallmentPaymentController {
   constructor(private readonly paymentService: InstallmentPaymentService) {}
 
-  // ======================================================
-  // 🔐 RUTAS PROTEGIDAS (AUDITORÍA CON USUARIO)
-  // ======================================================
-
-  // 📋 Listar todos los pagos
   @UseGuards(JwtAuthGuard)
   @Get()
   findAll() {
     return this.paymentService.findAll();
   }
 
-  // 🧾 Ver detalle de un pago
   @UseGuards(JwtAuthGuard)
   @Get(':id')
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.paymentService.findOne(id);
   }
 
-  // 💾 Registrar un nuevo pago
   @UseGuards(JwtAuthGuard)
   @Post()
   @UseInterceptors(
@@ -64,7 +57,6 @@ export class InstallmentPaymentController {
       paymentDate: body.paymentDate,
     };
 
-    // ✅ Guardamos ruta del comprobante adjunto (si se sube archivo)
     if (file && file.filename) {
       dto.receiptPath = `uploads/receipts/${file.filename}`;
     }
@@ -72,18 +64,12 @@ export class InstallmentPaymentController {
     return this.paymentService.create(dto);
   }
 
-  // ❌ Eliminar pago (aunque no lo uses en el front, lo dejamos)
   @UseGuards(JwtAuthGuard)
   @Delete(':id')
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.paymentService.remove(id);
   }
 
-  // ======================================================
-  // 🌐 RUTAS PÚBLICAS (SIN JWT – EVITA 401 AL ABRIR PDFs/ARCHIVOS)
-  // ======================================================
-
-  // 🖨️ Generar y descargar comprobante PDF del sistema
   @Get(':id/receipt')
   async generateReceipt(
     @Param('id', ParseIntPipe) id: number,
@@ -98,10 +84,9 @@ export class InstallmentPaymentController {
       doc.on('end', () => resolve(Buffer.concat(chunks))),
     );
 
-    // 👉 Helper para fecha sin problemas de timezone
     const formatDate = (value: any): string => {
       if (!value) return '-';
-      const iso = new Date(value).toISOString().slice(0, 10); // YYYY-MM-DD
+      const iso = new Date(value).toISOString().slice(0, 10);
       const [y, m, d] = iso.split('-');
       return `${Number(d)}/${Number(m)}/${y}`;
     };
@@ -111,7 +96,6 @@ export class InstallmentPaymentController {
         ? `$ ${n.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`
         : '-';
 
-    // 📄 Marca de agua (logo)
     try {
       const logoPath = path.join(__dirname, '../../logos/Logobyn.JPG');
       if (fs.existsSync(logoPath)) {
@@ -125,7 +109,6 @@ export class InstallmentPaymentController {
       console.warn('⚠️ No se pudo cargar el logo');
     }
 
-    // 🏷️ Encabezado
     doc
       .fontSize(20)
       .fillColor('#1e1e1e')
@@ -152,14 +135,12 @@ export class InstallmentPaymentController {
       doc.fontSize(11).fillColor('#1e1e1e');
     };
 
-    // 🧾 Datos del pago
     section('Datos del Pago');
     doc.text(`ID de pago: ${payment.id}`);
     doc.text(`Fecha de pago: ${formatDate(payment.paymentDate)}`);
     doc.text(`Monto abonado: ${pesos(Number(payment.amount))}`);
     doc.moveDown(1);
 
-    // 👤 Cliente
     section('Cliente');
     const client =
       (payment as any).client ||
@@ -175,12 +156,10 @@ export class InstallmentPaymentController {
       doc.text('Cliente no registrado');
     }
 
-    // 💳 Cuota asociada
     section('Cuota');
     if (payment.installment) {
       const inst: any = payment.installment;
 
-      // 🧮 Etiqueta cuota X/Y
       let cuotaLabel: string;
 
       if (inst.installmentNumber && inst.totalInstallments) {
@@ -200,18 +179,17 @@ export class InstallmentPaymentController {
       doc.text(`Vencimiento: ${formatDate(inst.dueDate)}`);
       doc.text(`Monto original: ${pesos(Number(inst.amount))}`);
 
-      // 💰 Cálculo de interés / saldos coherente con la grilla
       let saldoActual: number | null = null;
       let montoActualAntesPago: number | null = null;
 
-      const basePrincipal =
+      const principalAfter =
         inst.remainingAmount != null
           ? Number(inst.remainingAmount)
           : Number(inst.amount);
 
-      // Igual que en el service de cuotas: usamos HOY para interés
       const todayForInterest = new Date();
       let daysLate = 0;
+
       if (inst.dueDate) {
         const due = new Date(inst.dueDate);
         const d0 = new Date(todayForInterest);
@@ -225,15 +203,14 @@ export class InstallmentPaymentController {
       }
 
       const factor = 1 + 0.01 * daysLate;
-
-      // Saldo actualizado a hoy (después de este pago)
-      const currentAfter = factor > 1 ? basePrincipal * factor : basePrincipal;
-      saldoActual = +currentAfter.toFixed(2);
-
-      // Monto de la cuota al día de pago (antes del pago)
       const payAmountNum = Number(payment.amount) || 0;
-      const currentBefore = currentAfter + payAmountNum;
+
+      const principalBefore = principalAfter + payAmountNum / factor;
+      const currentBefore = principalBefore * factor;
+      const currentAfter = principalAfter * factor;
+
       montoActualAntesPago = +currentBefore.toFixed(2);
+      saldoActual = +currentAfter.toFixed(2);
 
       doc.text(
         `Monto de la cuota al día de pago (antes del pago): ${pesos(
@@ -247,14 +224,13 @@ export class InstallmentPaymentController {
         doc.text('Saldo pendiente actualizado: $ 0,00');
       }
 
-      // Recibe / observaciones (guardadas en la cuota)
       if (inst.receiver) {
         const recibeText =
           inst.receiver === 'AGENCY'
             ? 'Agencia'
             : inst.receiver === 'STUDIO'
-            ? 'Estudio'
-            : inst.receiver;
+              ? 'Estudio'
+              : inst.receiver;
         doc.text(`Recibe: ${recibeText}`);
       }
 
@@ -264,7 +240,6 @@ export class InstallmentPaymentController {
       }
     }
 
-    // ⚖️ Pie legal
     doc.moveDown(2);
     doc
       .fontSize(8)
@@ -285,7 +260,6 @@ export class InstallmentPaymentController {
     return res.send(buffer);
   }
 
-  // 📎 Descargar adjunto original (archivo subido)
   @Get(':id/attachment')
   async getAttachment(
     @Param('id', ParseIntPipe) id: number,
