@@ -10,10 +10,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import PDFDocument from 'pdfkit';
 import { SettingsService } from '../settings/settings.service';
-import { MailService } from '../mail/mail.service'; // ✅ EMAIL
+import { MailService } from '../mail/mail.service';
 
 // ✅ NUEVO (módulo Devoluciones)
 import { Refund, RefundStatus } from '../refunds/refund.entity';
+
+import { Subject } from 'rxjs';
 
 const pesos = (n: number) =>
   new Intl.NumberFormat('es-AR', {
@@ -21,6 +23,8 @@ const pesos = (n: number) =>
     currency: 'ARS',
     minimumFractionDigits: 0,
   }).format(n);
+
+type GuarantorDocKind = 'dni' | 'payslip';
 
 @Injectable()
 export class ReservationsService {
@@ -40,25 +44,33 @@ export class ReservationsService {
     @InjectRepository(User)
     private userRepo: Repository<User>,
 
-    // ✅ NUEVO: repo de devoluciones
     @InjectRepository(Refund)
     private refundsRepo: Repository<Refund>,
 
-    // ✅ NUEVO: transacciones
     private readonly dataSource: DataSource,
 
     private readonly settings: SettingsService,
 
-    // ✅ NUEVO: envío de emails
     private readonly mailService: MailService,
   ) {}
+
+  // ============================
+  // SSE (si lo usás)
+  // ============================
+  private updates$ = new Subject<{ type: 'created' | 'updated' | 'deleted'; id?: number }>();
+  getUpdatesStream() {
+    return this.updates$.asObservable();
+  }
+  private notify(type: 'created' | 'updated' | 'deleted', id?: number) {
+    this.updates$.next({ type, id });
+  }
 
   private readonly AR_TZ = 'America/Argentina/Buenos_Aires';
 
   private formatDateTimeAR(d: Date): string {
     return d.toLocaleString('es-AR', {
       timeZone: 'America/Argentina/Buenos_Aires',
-      hour12: false, // 24 hs
+      hour12: false,
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
@@ -67,11 +79,6 @@ export class ReservationsService {
     });
   }
 
-  /**
-   * Feriados configurables.
-   * - AR_HOLIDAYS puede incluir fechas YYYY-MM-DD separadas por coma.
-   *   Ej: "2025-01-01,2025-03-24,2025-12-25". Está en el .env
-   */
   private getHolidaySet(): Set<string> {
     const raw = (process.env.AR_HOLIDAYS ?? '').trim();
     const items = raw
@@ -92,11 +99,10 @@ export class ReservationsService {
     const y = parts.find((p) => p.type === 'year')?.value ?? '1970';
     const m = parts.find((p) => p.type === 'month')?.value ?? '01';
     const d = parts.find((p) => p.type === 'day')?.value ?? '01';
-    return `${y}-${m}-${d}`; // YYYY-MM-DD
+    return `${y}-${m}-${d}`;
   }
 
   private weekdayInTz(date: Date): number {
-    // 0=domingo ... 6=sábado, pero calculado en TZ AR, no en UTC
     const parts = new Intl.DateTimeFormat('en-US', {
       timeZone: this.AR_TZ,
       weekday: 'short',
@@ -117,26 +123,21 @@ export class ReservationsService {
 
   private isBusinessDay(date: Date, holidays: Set<string>): boolean {
     const wd = this.weekdayInTz(date);
-    if (wd === 0) return false; // domingo NO hábil
+    if (wd === 0) return false;
     const ymd = this.ymdInTz(date);
-    if (holidays.has(ymd)) return false; // feriado NO hábil
-    return true; // lunes-sábado hábil
+    if (holidays.has(ymd)) return false;
+    return true;
   }
 
-  /**
-   * Suma "horas hábiles" (sábado cuenta, domingo y feriados no).
-   * Implementación mínima: avanza de a 1 hora y sólo descuenta cuando cae en día hábil.
-   */
   private plusHours(d: Date, hours: number) {
     const holidays = this.getHolidaySet();
     let remaining = hours;
     let cur = new Date(d);
 
     while (remaining > 0) {
-      cur = new Date(cur.getTime() + 60 * 60 * 1000); // +1 hora
+      cur = new Date(cur.getTime() + 60 * 60 * 1000);
       if (this.isBusinessDay(cur, holidays)) remaining--;
     }
-
     return cur;
   }
 
@@ -160,20 +161,17 @@ export class ReservationsService {
 
     return list.map((r) => {
       const seller = r.seller as any;
-      const sellerFullName =
-        seller
-          ? `${seller.firstName ?? ''} ${seller.lastName ?? ''}`.trim() ||
-            seller.name ||
-            seller.username ||
-            null
-          : null;
+      const sellerFullName = seller
+        ? `${seller.firstName ?? ''} ${seller.lastName ?? ''}`.trim() ||
+          seller.name ||
+          seller.username ||
+          null
+        : null;
 
       return {
         id: r.id,
         clientDni: r.client?.dni || '-',
-        clientName: r.client
-          ? `${r.client.firstName} ${r.client.lastName}`
-          : 'Sin cliente',
+        clientName: r.client ? `${r.client.firstName} ${r.client.lastName}` : 'Sin cliente',
         vehicle: r.vehicle
           ? `${r.vehicle.brand} ${r.vehicle.model} ${r.vehicle.versionName || ''}`
           : 'Sin vehículo',
@@ -192,9 +190,7 @@ export class ReservationsService {
       where: { id },
       relations: ['client', 'vehicle', 'guarantors', 'seller'],
     });
-    if (!reservation) {
-      throw new NotFoundException(`Reserva con ID ${id} no encontrada`);
-    }
+    if (!reservation) throw new NotFoundException(`Reserva con ID ${id} no encontrada`);
     return reservation;
   }
 
@@ -207,15 +203,14 @@ export class ReservationsService {
     date?: string;
   }) {
     let client: Client | null = null;
+
     if (dto.clientId) {
       client = await this.clientRepo.findOne({ where: { id: dto.clientId } });
     } else if (dto.clientDni) {
       client = await this.clientRepo.findOne({ where: { dni: dto.clientDni } });
     }
 
-    if (!client) {
-      throw new BadRequestException('Cliente no encontrado por DNI/ID');
-    }
+    if (!client) throw new BadRequestException('Cliente no encontrado por DNI/ID');
 
     const vehicle = await this.vehicleRepo.findOne({ where: { plate: dto.plate } });
     if (!vehicle) throw new BadRequestException('Vehículo no encontrado');
@@ -231,9 +226,7 @@ export class ReservationsService {
     const date = dto.date ? new Date(dto.date) : new Date();
     const expiry = this.plusHours(date, 48);
 
-    // 🔹 Obtener monto por defecto desde settings (reservation.amount)
     const defaultAmount = await this.settings.getNumber('reservation.amount', 500_000);
-
     const amount = dto.amount != null ? Number(dto.amount) : defaultAmount;
 
     if (!Number.isFinite(amount) || amount <= 0) {
@@ -258,7 +251,9 @@ export class ReservationsService {
     vehicle.status = 'reserved';
     await this.vehicleRepo.save(vehicle);
 
-    // ✅ Opción B: enviar email SOLO al crear la reserva
+    this.notify('created', saved.id);
+
+    // ✅ Email con PDF (igual que lo tenías)
     try {
       const clientEmail = (client as any)?.email;
       if (clientEmail) {
@@ -270,9 +265,7 @@ export class ReservationsService {
 
         const html = `
           <p>Hola ${client?.firstName ?? ''} ${client?.lastName ?? ''},</p>
-
           <p>Te confirmamos que la reserva fue registrada correctamente.</p>
-
           <ul>
             <li><strong>Reserva Nº:</strong> ${saved.id}</li>
             <li><strong>Vehículo:</strong> ${vehicleLabel}</li>
@@ -281,16 +274,10 @@ export class ReservationsService {
             <li><strong>Fecha:</strong> ${new Date(saved.date).toLocaleDateString('es-AR')}</li>
             <li><strong>Vigencia hasta:</strong> ${this.formatDateTimeAR(new Date(saved.expiryDate))}</li>
           </ul>
-
           <p>Adjunto vas a encontrar el comprobante en PDF.</p>
-
-          <p>
-            Saludos,<br/>
-            <strong>GL Motors</strong>
-          </p>
+          <p>Saludos,<br/><strong>GL Motors</strong></p>
         `;
 
-        // Nombre de archivo consistente con getPdf()
         const today = new Date();
         const dateString = today.toISOString().split('T')[0];
         const lastName = client?.lastName || 'Cliente';
@@ -303,23 +290,15 @@ export class ReservationsService {
           pdfBuffer,
           html,
         });
-
-        console.log('✅ Reserva enviada por email a:', clientEmail);
-      } else {
-        console.warn(`⚠️ El cliente de la reserva ${saved.id} no tiene email cargado.`);
       }
     } catch (err) {
-      console.error(
-        `❌ No se pudo enviar la reserva ${saved.id} por email (la reserva se creó igual):`,
-        err,
-      );
+      console.error(`❌ No se pudo enviar la reserva ${saved.id} por email (se creó igual):`, err);
     }
 
     return saved;
   }
 
-  // ✅ Método actualizado (estados y sincronización con vehículo)
-  // ✅ NUEVO: al pasar a "Cancelada" crea devolución (Refund) en la misma transacción
+  // ✅ update (lo dejo igual, con transacción + refunds)
   async update(id: number, dto: { status?: Reservation['status'] }) {
     const res = await this.findOne(id);
 
@@ -327,7 +306,6 @@ export class ReservationsService {
     if (!nextStatus) return res;
 
     const prevStatus = res.status;
-
     if (prevStatus === nextStatus) return res;
 
     const canceledAt = nextStatus === 'Cancelada' ? new Date() : null;
@@ -339,7 +317,6 @@ export class ReservationsService {
 
       res.status = nextStatus;
       res.updatedAt = new Date();
-
       await reservationsRepoTx.save(res);
 
       if (nextStatus === 'Cancelada' || nextStatus === 'Vencida') {
@@ -347,9 +324,6 @@ export class ReservationsService {
         if (v) {
           v.status = 'available';
           await vehicleRepoTx.save(v);
-          console.log(
-            `[${this.nowString()}] 🚗 Vehículo ${v.plate} liberado por cambio de estado (${nextStatus}).`,
-          );
         }
       }
 
@@ -358,32 +332,19 @@ export class ReservationsService {
         if (v) {
           v.status = 'reserved';
           await vehicleRepoTx.save(v);
-          console.log(
-            `[${this.nowString()}] 🚗 Vehículo ${v.plate} marcado como reservado nuevamente.`,
-          );
         }
       }
 
       if (nextStatus === 'Cancelada') {
-        const already = await refundsRepoTx.findOne({
-          where: { reservationId: res.id },
-        });
-
+        const already = await refundsRepoTx.findOne({ where: { reservationId: res.id } });
         if (!already) {
-          const refundAmount = await this.settings.getNumber(
-            'reservation.refundAmount',
-            750_000,
-          );
-
-          const clientDni = res.client?.dni ?? '-';
-          const plate = res.plate ?? res.vehicle?.plate ?? '-';
-          const vehicleLabel = res.vehicleLabel ?? '-';
+          const refundAmount = await this.settings.getNumber('reservation.refundAmount', 750_000);
 
           const refund = refundsRepoTx.create({
             reservationId: res.id,
-            clientDni,
-            plate,
-            vehicleLabel,
+            clientDni: res.client?.dni ?? '-',
+            plate: res.plate ?? res.vehicle?.plate ?? '-',
+            vehicleLabel: res.vehicleLabel ?? '-',
             canceledAt: canceledAt ?? new Date(),
             status: RefundStatus.PENDING,
             expectedAmount: Number(refundAmount),
@@ -393,30 +354,16 @@ export class ReservationsService {
           } as Partial<Refund>);
 
           await refundsRepoTx.save(refund);
-
-          console.log(
-            `[${this.nowString()}] 💸 Devolución creada para reserva #${res.id} por ${pesos(
-              Number(refundAmount),
-            )} (Pendiente).`,
-          );
-        } else {
-          console.log(
-            `[${this.nowString()}] 💸 Devolución ya existente para reserva #${res.id}. No se duplica.`,
-          );
         }
       }
     });
 
-    console.log(
-      `[${this.nowString()}] Estado de reserva #${res.id} actualizado: ${prevStatus} → ${nextStatus}`,
-    );
-
+    this.notify('updated', res.id);
     return res;
   }
 
   async expirePastReservations(): Promise<void> {
     const now = new Date();
-
     const allReservations = await this.reservationsRepo.find({
       relations: ['client', 'vehicle', 'guarantors'],
     });
@@ -433,14 +380,7 @@ export class ReservationsService {
         if (reservation.vehicle) {
           reservation.vehicle.status = 'available';
           await this.vehicleRepo.save(reservation.vehicle);
-          console.log(
-            `[${this.nowString()}] 🚗 Vehículo ${reservation.vehicle.plate} liberado automáticamente.`,
-          );
         }
-
-        console.log(
-          `[${this.nowString()}] ⚠️ Reserva #${reservation.id} marcada como Vencida automáticamente.`,
-        );
       }
     }
   }
@@ -453,25 +393,26 @@ export class ReservationsService {
   async extendReservationsWithNewGuarantors(): Promise<void> {
     const now = new Date();
     const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-    const reservations = await this.reservationsRepo.find({
-      relations: ['guarantors'],
-    });
+    const reservations = await this.reservationsRepo.find({ relations: ['guarantors'] });
 
     for (const reservation of reservations) {
       if (reservation.status !== 'Vigente') continue;
+
       const recentGuarantors = reservation.guarantors.filter(
         (g) => new Date(g.createdAt) > cutoff,
       );
+
       if (recentGuarantors.length > 0) {
         reservation.expiryDate = this.plusHours(new Date(reservation.expiryDate), 24);
         reservation.updatedAt = new Date();
         await this.reservationsRepo.save(reservation);
-        console.log(
-          `[${this.nowString()}] 🔄 Reserva #${reservation.id} extendida automáticamente por nuevos garantes.`,
-        );
       }
     }
   }
+
+  // ============================
+  // ✅ GARANTES (Cloudinary URLs + legacy fs)
+  // ============================
 
   async addGuarantor(
     reservationId: number,
@@ -482,33 +423,10 @@ export class ReservationsService {
       address?: string;
       phone?: string;
     },
-    files: { dniFile?: any[]; payslipFile?: any[] },
+    docs: { dniFilePath?: string | null; payslipFilePath?: string | null },
   ) {
     const reservation = await this.findOne(reservationId);
     if (!reservation) throw new NotFoundException('Reserva no encontrada');
-
-    const uploadDir = path.join(__dirname, '../../uploads/guarantors');
-    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-
-    let dniFilePath: string | null = null;
-    let payslipFilePath: string | null = null;
-
-    const dniFile = files?.dniFile?.[0];
-    const payslipFile = files?.payslipFile?.[0];
-
-    if (dniFile) {
-      const fileName = `dni_${Date.now()}_${dniFile.originalname}`;
-      const fullPath = path.join(uploadDir, fileName);
-      fs.writeFileSync(fullPath, dniFile.buffer);
-      dniFilePath = `/uploads/guarantors/${fileName}`;
-    }
-
-    if (payslipFile) {
-      const fileName = `payslip_${Date.now()}_${payslipFile.originalname}`;
-      const fullPath = path.join(uploadDir, fileName);
-      fs.writeFileSync(fullPath, payslipFile.buffer);
-      payslipFilePath = `/uploads/guarantors/${fileName}`;
-    }
 
     const guarantor = this.guarantorRepo.create({
       reservation: { id: reservation.id } as Reservation,
@@ -517,8 +435,8 @@ export class ReservationsService {
       dni: data.dni,
       address: data.address,
       phone: data.phone,
-      dniFilePath,
-      payslipFilePath,
+      dniFilePath: docs.dniFilePath ?? null,
+      payslipFilePath: docs.payslipFilePath ?? null,
     });
 
     await this.guarantorRepo.save(guarantor);
@@ -527,10 +445,63 @@ export class ReservationsService {
     updated.updatedAt = new Date();
     await this.reservationsRepo.save(updated);
 
+    this.notify('updated', reservation.id);
     return updated;
   }
 
-  // ✅ PDF generación (SOLO GENERA, NO ENVÍA EMAIL)
+  async getGuarantorDocUrlIfAny(
+    guarantorId: number,
+    kind: GuarantorDocKind,
+  ): Promise<string | null> {
+    const g = await this.guarantorRepo.findOne({ where: { id: guarantorId } });
+    if (!g) throw new NotFoundException('Garante no encontrado');
+
+    const val = kind === 'dni' ? g.dniFilePath : g.payslipFilePath;
+    if (!val) return null;
+
+    // Cloudinary / URL
+    if (/^https?:\/\//i.test(val)) return val;
+
+    return null;
+  }
+
+  async getGuarantorDocPath(
+    guarantorId: number,
+    kind: GuarantorDocKind,
+  ): Promise<{ absPath: string; filename: string }> {
+    const g = await this.guarantorRepo.findOne({ where: { id: guarantorId } });
+    if (!g) throw new NotFoundException('Garante no encontrado');
+
+    const val = kind === 'dni' ? g.dniFilePath : g.payslipFilePath;
+    if (!val) {
+      throw new NotFoundException(
+        kind === 'dni'
+          ? 'DNI no encontrado para este garante'
+          : 'Recibo de sueldo no encontrado para este garante',
+      );
+    }
+
+    // Si es URL, este método no debería usarse
+    if (/^https?:\/\//i.test(val)) {
+      throw new BadRequestException('El archivo está en Cloudinary (use redirect).');
+    }
+
+    // legacy: guardado como "/uploads/guarantors/xxx.pdf"
+    const cleaned = val.replace(/^\/+/, ''); // "uploads/..."
+    const absPath = path.join(process.cwd(), cleaned);
+    const filename = path.basename(absPath);
+
+    if (!fs.existsSync(absPath)) {
+      throw new NotFoundException('Archivo no encontrado en el servidor');
+    }
+
+    return { absPath, filename };
+  }
+
+  // ============================
+  // PDF generación (igual que lo tenías)
+  // ============================
+
   async getPdf(id: number): Promise<Buffer> {
     const res = await this.reservationsRepo.findOne({
       where: { id },
@@ -550,6 +521,7 @@ export class ReservationsService {
     const doc = new PDFDocument({ margin: 50 });
     const chunks: Buffer[] = [];
     doc.on('data', (c) => chunks.push(c));
+
     const done = new Promise<Buffer>((resolve) =>
       doc.on('end', () => resolve(Buffer.concat(chunks))),
     );
@@ -565,27 +537,18 @@ export class ReservationsService {
       }
     } catch {}
 
-    doc
-      .fontSize(22)
-      .fillColor('#1e1e1e')
-      .text('GL Motors', { align: 'center' });
-    doc
-      .fontSize(12)
-      .fillColor('#555')
-      .text('Comprobante de Reserva', { align: 'center' });
-    doc
-      .fontSize(10)
-      .fillColor('#777')
-      .text(`Emitido el ${this.nowString()}`, { align: 'center' });
+    doc.fontSize(22).fillColor('#1e1e1e').text('GL Motors', { align: 'center' });
+    doc.fontSize(12).fillColor('#555').text('Comprobante de Reserva', { align: 'center' });
+    doc.fontSize(10).fillColor('#777').text(`Emitido el ${this.nowString()}`, {
+      align: 'center',
+    });
     doc.moveDown(1);
     doc.moveTo(50, doc.y).lineTo(550, doc.y).strokeColor('#009879').stroke();
     doc.moveDown(1);
 
     const sectionTitle = (t: string) => {
       doc.moveDown(0.6);
-      doc.fontSize(13).fillColor('#009879').text(t.toUpperCase(), {
-        underline: true,
-      });
+      doc.fontSize(13).fillColor('#009879').text(t.toUpperCase(), { underline: true });
       doc.moveDown(0.3);
       doc.fontSize(11).fillColor('#1e1e1e');
     };
@@ -600,8 +563,8 @@ export class ReservationsService {
     sectionTitle('Cliente');
     doc.text(`${res.client.firstName} ${res.client.lastName}`);
     doc.text(`DNI: ${res.client.dni}`);
-    if (res.client.phone) doc.text(`Teléfono: ${res.client.phone}`);
-    if (res.client.address) doc.text(`Domicilio: ${res.client.address}`);
+    if ((res.client as any).phone) doc.text(`Teléfono: ${(res.client as any).phone}`);
+    if ((res.client as any).address) doc.text(`Domicilio: ${(res.client as any).address}`);
 
     sectionTitle('Vehículo');
     doc.text(`${res.vehicleLabel}`);
@@ -617,9 +580,7 @@ export class ReservationsService {
         seller.name ||
         seller.username ||
         '';
-      if (sellerFullName) {
-        doc.text(sellerFullName);
-      }
+      if (sellerFullName) doc.text(sellerFullName);
     }
 
     doc.moveDown(1);
@@ -635,29 +596,24 @@ export class ReservationsService {
 
     doc.moveDown(2);
     doc.moveTo(50, doc.y).lineTo(550, doc.y).strokeColor('#ccc').stroke();
+
     try {
       const logoPath = path.join(__dirname, '../../public/Logobyn.JPG');
       const footerY = doc.y + 5;
       if (fs.existsSync(logoPath)) {
         doc.image(logoPath, 60, footerY, { fit: [40, 40] });
       }
-      doc
-        .fontSize(8)
-        .fillColor('#777')
-        .text(
-          'GL Motors · Dr. L. Chiesa 640 · Longchamps',
-          110,
-          footerY + 10,
-          { align: 'left' },
-        );
+      doc.fontSize(8).fillColor('#777').text(
+        'GL Motors · Dr. L. Chiesa 640 · Longchamps',
+        110,
+        footerY + 10,
+        { align: 'left' },
+      );
     } catch {
-      doc
-        .fontSize(8)
-        .fillColor('#777')
-        .text(
-          'GL Motors · Dr. L. Chiesa 640 · Longchamps',
-          { align: 'center' },
-        );
+      doc.fontSize(8).fillColor('#777').text(
+        'GL Motors · Dr. L. Chiesa 640 · Longchamps',
+        { align: 'center' },
+      );
     }
 
     doc.end();
@@ -666,7 +622,6 @@ export class ReservationsService {
     const pdfBuffer = Buffer.concat(chunks);
     fs.writeFileSync(filePath, pdfBuffer);
 
-    console.log(`✅ Reserva exportada como ${fileName}`);
     return pdfBuffer;
   }
 }

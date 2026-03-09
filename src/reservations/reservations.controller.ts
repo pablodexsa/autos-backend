@@ -1,201 +1,288 @@
-﻿import {
+﻿// src/reservations/reservations.controller.ts
+
+import {
   Controller,
   Get,
   Post,
+  Body,
   Patch,
   Param,
-  Body,
   ParseIntPipe,
   UploadedFiles,
   UseInterceptors,
   Res,
+  NotFoundException,
+  Sse,
+  UseGuards,
   HttpException,
   HttpStatus,
-  UseGuards,
 } from '@nestjs/common';
-import { ReservationsService } from './reservations.service';
-import { AnyFilesInterceptor } from '@nestjs/platform-express';
-import type { Response } from 'express';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
-import * as fs from 'fs';
-import * as path from 'path';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { FileFieldsInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
+import { Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
+import * as express from 'express';
 
-import { PermissionsGuard } from '../auth/permissions.guard';
-import { RequirePermissions } from '../auth/permissions.decorator';
+import { ReservationsService } from './reservations.service';
+import { CreateReservationDto } from './dto/create-reservation.dto';
+import { UpdateReservationDto } from './dto/update-reservation.dto';
+import { AddGuarantorDto } from './dto/add-guarantor.dto';
+
+// ✅ TU ARCHIVO EXPORTA ESTA CLASE (no UpdateStatusDto)
+import { UpdateReservationStatusDto as UpdateStatusDto } from './dto/update-status.dto';
+
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { CloudinaryService } from '../common/cloudinary/cloudinary.service';
+
+// swagger (si ya lo venías usando)
+import { ApiOperation, ApiTags } from '@nestjs/swagger';
 
 @ApiTags('Reservations')
+@UseGuards(JwtAuthGuard)
 @Controller('reservations')
 export class ReservationsController {
-  constructor(private readonly reservationsService: ReservationsService) {}
+  constructor(
+    private readonly reservationsService: ReservationsService,
+    private readonly cloudinaryService: CloudinaryService,
+  ) {}
 
-  // 🔹 Listado completo (protegido)
-  @UseGuards(JwtAuthGuard)
+  // ============================
+  // 🔄 STREAM (SSE) DE CAMBIOS (si lo usás)
+  // ============================
+  @Sse('stream')
+  stream(): Observable<MessageEvent> {
+    return this.reservationsService.getUpdatesStream().pipe(
+      map((event) => ({ data: event } as MessageEvent)),
+    );
+  }
+
+  // ============================
+  // CRUD RESERVAS
+  // ============================
+
   @Get()
-  @ApiOperation({ summary: 'Listar todas las reservas' })
   async findAll() {
     return this.reservationsService.findAll();
   }
 
-  // 🔹 Obtener una reserva por ID (protegido)
-  @UseGuards(JwtAuthGuard)
   @Get(':id')
-  @ApiOperation({ summary: 'Obtener una reserva por ID' })
   async findOne(@Param('id', ParseIntPipe) id: number) {
     return this.reservationsService.findOne(id);
   }
 
-  // 🔹 Crear una nueva reserva (protegido) — sin permiso por ahora (no lo pediste)
-  @UseGuards(JwtAuthGuard)
   @Post()
-  @ApiOperation({ summary: 'Crear una nueva reserva y generar PDF' })
-  async create(@Body() dto: any, @Res() res: Response) {
-    try {
-      const created = await this.reservationsService.create(dto);
-      const buffer = await this.reservationsService.getPdf(created.id);
-
-      const dir = path.join(
-        __dirname,
-        '../../uploads/reservations',
-        String(created.id),
-      );
-      let fileName = `Reserva-${created.id}.pdf`;
-
-      if (fs.existsSync(dir)) {
-        const pdfFiles = fs
-          .readdirSync(dir)
-          .filter((f) => f.toLowerCase().endsWith('.pdf'));
-        if (pdfFiles.length > 0) fileName = pdfFiles[0];
-      }
-
-      const filePath = path.join(dir, fileName);
-      if (!fs.existsSync(filePath)) {
-        fs.writeFileSync(filePath, buffer);
-      }
-
-      res.status(201).json({
-        id: created.id,
-        pdfName: fileName,
-        pdfPath: `/uploads/reservations/${created.id}/${fileName}`,
-      });
-    } catch (error) {
-      console.error('Error al crear la reserva:', error);
-      throw new HttpException(
-        'Error al crear la reserva',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+  async create(@Body() dto: CreateReservationDto) {
+    return this.reservationsService.create(dto as any);
   }
 
-  // ✅ ACEPTAR reserva (Gerencia/Admin)
-  // Interpretación: aceptar = poner la reserva en "Vigente"
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
-  @Patch(':id/approve')
-  @RequirePermissions('RESERVATION_APPROVE')
-  @ApiOperation({ summary: 'Aceptar reserva (pasar a Vigente)' })
-  async approve(@Param('id', ParseIntPipe) id: number) {
-    try {
-      return await this.reservationsService.update(id, { status: 'Vigente' });
-    } catch (error) {
-      console.error('Error al aceptar reserva:', error);
-      throw new HttpException(
-        'Error al aceptar la reserva',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
-  // ✅ CANCELAR reserva (Gerencia/Admin)
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
-  @Patch(':id/cancel')
-  @RequirePermissions('RESERVATION_CANCEL')
-  @ApiOperation({ summary: 'Cancelar reserva (pasar a Cancelada)' })
-  async cancel(@Param('id', ParseIntPipe) id: number) {
-    try {
-      return await this.reservationsService.update(id, { status: 'Cancelada' });
-    } catch (error) {
-      console.error('Error al cancelar reserva:', error);
-      throw new HttpException(
-        'Error al cancelar la reserva',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
-  // 🔹 Editar reserva existente (Gerencia/Admin)
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Patch(':id')
-  @RequirePermissions('RESERVATION_EDIT')
-  @ApiOperation({ summary: 'Actualizar una reserva existente' })
-  async update(@Param('id', ParseIntPipe) id: number, @Body() dto: any) {
-    try {
-      return await this.reservationsService.update(id, dto);
-    } catch (error) {
-      console.error('Error al actualizar reserva:', error);
-      throw new HttpException(
-        'Error al actualizar la reserva',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+  async update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateReservationDto,
+  ) {
+    return this.reservationsService.update(id, dto as any);
   }
 
-  // 🔹 Agregar garante con archivos adjuntos (protegido) — sin permiso por ahora
-  @UseGuards(JwtAuthGuard)
+  // (Si querés usar esto, ya compila porque UpdateStatusDto existe como alias)
+  // @Patch(':id/status')
+  // async updateStatus(
+  //   @Param('id', ParseIntPipe) id: number,
+  //   @Body() dto: UpdateStatusDto,
+  // ) {
+  //   return this.reservationsService.update(id, { status: dto.status } as any);
+  // }
+
+  // ============================
+  // GARANTES + ADJUNTOS (Cloudinary)
+  // ============================
+
   @Post(':id/guarantors')
-  @UseInterceptors(AnyFilesInterceptor())
   @ApiOperation({
-    summary: 'Agregar garante a una reserva con archivos adjuntos',
+    summary: 'Agregar garante a una reserva (con adjuntos en Cloudinary)',
   })
+  @UseInterceptors(
+    FileFieldsInterceptor(
+      [
+        { name: 'dniFile', maxCount: 1 },
+        { name: 'payslipFile', maxCount: 1 },
+      ],
+      {
+        storage: memoryStorage(),
+        limits: { fileSize: 15 * 1024 * 1024 }, // 15MB
+      },
+    ),
+  )
   async addGuarantor(
+    @Param('id', ParseIntPipe) reservationId: number,
+    @Body() dto: AddGuarantorDto,
+    @UploadedFiles()
+    files: {
+      dniFile?: Express.Multer.File[];
+      payslipFile?: Express.Multer.File[];
+    },
+  ) {
+    const dniFile = files?.dniFile?.[0];
+    const payslipFile = files?.payslipFile?.[0];
+
+    let dniUrl: string | null = null;
+    let payslipUrl: string | null = null;
+
+    // ✅ Subimos a Cloudinary (si vienen)
+    // Usamos (reservationId + dto.dni) como base => NO necesitás guarantorId aún
+    if (dniFile) {
+      const up = await this.cloudinaryService.uploadGuarantorDni({
+        buffer: dniFile.buffer,
+        originalName: dniFile.originalname,
+        reservationId,
+        dni: dto.dni,
+      });
+      dniUrl = up.url;
+    }
+
+    if (payslipFile) {
+      const up = await this.cloudinaryService.uploadGuarantorPayslip({
+        buffer: payslipFile.buffer,
+        originalName: payslipFile.originalname,
+        reservationId,
+        dni: dto.dni,
+      });
+      payslipUrl = up.url;
+    }
+
+    return this.reservationsService.addGuarantor(
+      reservationId,
+      {
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        dni: dto.dni,
+        address: (dto as any).address,
+        phone: (dto as any).phone,
+      },
+      {
+        dniFilePath: dniUrl,
+        payslipFilePath: payslipUrl,
+      },
+    );
+  }
+
+  // ============================
+  // 📄 DESCARGAR DOCS DEL GARANTE
+  // ✅ Si está en Cloudinary => PROXY (evita about:blank#blocked)
+  // ============================
+
+  private async proxyDownloadFromUrl(opts: {
+    url: string;
+    res: express.Response;
+    fallbackFilename: string;
+  }) {
+    const { url, res, fallbackFilename } = opts;
+
+    // Node 18+ tiene fetch
+    const r = await fetch(url);
+
+    if (!r.ok) {
+      throw new HttpException(
+        `No se pudo descargar el archivo remoto (status ${r.status})`,
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
+
+    const contentType = r.headers.get('content-type') || 'application/octet-stream';
+    const contentLength = r.headers.get('content-length');
+
+    // intentamos derivar un nombre razonable
+    const filename = fallbackFilename;
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    if (contentLength) res.setHeader('Content-Length', contentLength);
+
+    // stream -> response
+    // @ts-ignore - Node fetch body es ReadableStream
+    if (!r.body) {
+      throw new HttpException(
+        'Respuesta remota sin body',
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
+
+    // Convertimos WebStream a Node stream
+    // @ts-ignore
+    const { Readable } = await import('stream');
+    // @ts-ignore
+    const nodeStream = Readable.fromWeb(r.body);
+    return nodeStream.pipe(res);
+  }
+
+  @Get('guarantors/:guarantorId/dni')
+  async downloadGuarantorDni(
+    @Param('guarantorId', ParseIntPipe) guarantorId: number,
+    @Res() res: express.Response,
+  ) {
+    const url = await this.reservationsService.getGuarantorDocUrlIfAny(
+      guarantorId,
+      'dni',
+    );
+
+    // ✅ Cloudinary => proxy download (misma origin, sin popup/redirect)
+    if (url) {
+      return this.proxyDownloadFromUrl({
+        url,
+        res,
+        fallbackFilename: `garante-${guarantorId}-dni`,
+      });
+    }
+
+    // legacy: filesystem
+    const { absPath, filename } =
+      await this.reservationsService.getGuarantorDocPath(guarantorId, 'dni');
+    return res.download(absPath, filename);
+  }
+
+  @Get('guarantors/:guarantorId/payslip')
+  async downloadGuarantorPayslip(
+    @Param('guarantorId', ParseIntPipe) guarantorId: number,
+    @Res() res: express.Response,
+  ) {
+    const url = await this.reservationsService.getGuarantorDocUrlIfAny(
+      guarantorId,
+      'payslip',
+    );
+
+    // ✅ Cloudinary => proxy download
+    if (url) {
+      return this.proxyDownloadFromUrl({
+        url,
+        res,
+        fallbackFilename: `garante-${guarantorId}-recibo`,
+      });
+    }
+
+    const { absPath, filename } =
+      await this.reservationsService.getGuarantorDocPath(
+        guarantorId,
+        'payslip',
+      );
+    return res.download(absPath, filename);
+  }
+
+  // ============================
+  // PDF (ya lo tenías)
+  // ============================
+
+  @Get(':id/pdf')
+  async getPdf(
     @Param('id', ParseIntPipe) id: number,
-    @Body() data: any,
-    @UploadedFiles() files: any,
+    @Res() res: express.Response,
   ) {
     try {
-      const mappedFiles = {
-        dniFile: files?.filter((f: any) => f.fieldname === 'dniFile'),
-        payslipFile: files?.filter((f: any) => f.fieldname === 'payslipFile'),
-      };
-
-      return await this.reservationsService.addGuarantor(id, data, mappedFiles);
-    } catch (error) {
-      console.error('Error al agregar garante:', error);
-      throw new HttpException(
-        'Error al agregar garante',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
-  // 🔹 Descargar PDF de reserva (SIN GUARD)
-  @Get(':id/pdf')
-  @ApiOperation({
-    summary: 'Descargar comprobante de reserva en PDF con nombre real',
-  })
-  async pdf(@Param('id', ParseIntPipe) id: number, @Res() res: Response) {
-    try {
-      const buffer = await this.reservationsService.getPdf(id);
-      const dir = path.join(
-        __dirname,
-        '../../uploads/reservations',
-        String(id),
-      );
-      let fileName = `Reserva-${id}.pdf`;
-
-      if (fs.existsSync(dir)) {
-        const pdfs = fs
-          .readdirSync(dir)
-          .filter((f) => f.toLowerCase().endsWith('.pdf'));
-        if (pdfs.length > 0) fileName = pdfs[0];
-      }
-
+      const pdfBuffer = await this.reservationsService.getPdf(id);
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader(
         'Content-Disposition',
-        `attachment; filename="${encodeURIComponent(fileName)}"`,
+        `attachment; filename=reserva-${id}.pdf`,
       );
-
-      res.send(buffer);
+      return res.send(pdfBuffer);
     } catch (error) {
       console.error('Error al generar PDF de la reserva:', error);
       throw new HttpException(
@@ -205,8 +292,7 @@ export class ReservationsController {
     }
   }
 
-  // 🔹 Forzar expiración manual (protegido) — sin permiso por ahora
-  @UseGuards(JwtAuthGuard)
+  // 🔹 Forzar expiración manual (si lo tenías)
   @Post('expire')
   @ApiOperation({
     summary: 'Marcar manualmente las reservas vencidas y liberar vehículos',

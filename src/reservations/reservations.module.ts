@@ -9,16 +9,18 @@ import { Client } from '../clients/entities/client.entity';
 import { User } from '../users/user.entity';
 import { ReservationsTasks } from './reservations.tasks';
 import { SettingsModule } from '../settings/settings.module';
-import { AuditModule } from '../audit/audit.module'; // 👈 NUEVO
+import { AuditModule } from '../audit/audit.module';
 import { Refund } from '../refunds/refund.entity';
 import { MailModule } from '../mail/mail.module';
+import { CloudinaryModule } from '../common/cloudinary/cloudinary.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Reservation, Guarantor, Vehicle, Client, User, Refund,]),
-    SettingsModule, // para poder inyectar SettingsService en ReservationsService
-    AuditModule,     // 👈 SE AGREGA AQUÍ
+    TypeOrmModule.forFeature([Reservation, Guarantor, Vehicle, Client, User, Refund]),
+    SettingsModule,
+    AuditModule,
     MailModule,
+    CloudinaryModule, // ✅ necesario para inyectar CloudinaryService en controller
   ],
   controllers: [ReservationsController],
   providers: [ReservationsService, ReservationsTasks],
