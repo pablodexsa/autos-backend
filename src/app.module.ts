@@ -35,6 +35,7 @@ import { SettingsModule } from './settings/settings.module';
 import { Setting } from './settings/setting.entity';
 import { MailModule } from './mail/mail.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { DirectoModule } from './directo/directo.module';
 
 // 📦 Entidades
 import { User } from './users/user.entity';
@@ -122,6 +123,7 @@ import { RolePermission } from './permissions/role-permission.entity';
 
     // ✅ NUEVO: expone /refunds
     RefundsModule,
+    DirectoModule,
   ],
   controllers: [AppController],
   providers: [
