@@ -12,9 +12,21 @@ import { Client } from '../clients/entities/client.entity';
 import { LoanRate } from '../loan-rates/loan-rate.entity';
 import { BudgetReportsService } from '../budget-reports/budget-reports.service';
 import { MailService } from '../mail/mail.service';
+import { SettingsService } from '../settings/settings.service';
 import PDFDocument from 'pdfkit';
 import * as fs from 'fs';
 import * as path from 'path';
+
+type MotoPlanConfig = {
+  code: string;
+  name: string;
+  installments: number;
+  downPayment?: number;
+  totalInstallments?: number;
+  firstInstallmentsCount?: number;
+  firstInstallmentAmount?: number;
+  remainingInstallmentAmount?: number;
+};
 
 @Injectable()
 export class BudgetsService {
@@ -36,6 +48,9 @@ export class BudgetsService {
 
     // 👇 Email (Gmail SMTP)
     private readonly mailService: MailService,
+
+    // 👇 Settings (para planes de motos)
+    private readonly settingsService: SettingsService,
   ) {}
 
   // 🔐 Helper: categorías permitidas según permisos del usuario autenticado
@@ -75,6 +90,31 @@ export class BudgetsService {
         'No tenés permiso para operar con este tipo de vehículo',
       );
     }
+  }
+
+  // 🏍️ Lee planes de motos desde settings
+  private async getMotoPlans(): Promise<MotoPlanConfig[]> {
+    const raw = await this.settingsService.get('moto.plans');
+    if (!raw) return [];
+
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  // 🏍️ Busca un plan puntual por código
+  private async getMotoPlanConfig(
+    code?: string | null,
+  ): Promise<MotoPlanConfig | null> {
+    if (!code) return null;
+
+    const plans = await this.getMotoPlans();
+    const plan = plans.find((p) => String(p.code) === String(code));
+
+    return plan ?? null;
   }
 
   async findAll(user: any): Promise<Budget[]> {
@@ -212,6 +252,8 @@ export class BudgetsService {
       personalAmount +
       financiacionAmount;
 
+    const isMotoPlan = !!dto.motoPlanCode;
+
     const someAmountEntered =
       downPayment ||
       tradeInValue ||
@@ -219,8 +261,10 @@ export class BudgetsService {
       personalAmount ||
       financiacionAmount;
 
-    if (someAmountEntered) {
+    // 🚫 Los planes de motos NO requieren que coincida con el precio del vehículo
+    if (!isMotoPlan && someAmountEntered) {
       const diff = Math.abs(totalComposition - vehiclePrice);
+
       if (diff > 1) {
         console.error('❌ Composición inválida en presupuesto', {
           vehiclePrice,
@@ -231,6 +275,7 @@ export class BudgetsService {
           financiacionAmount,
           totalComposition,
         });
+
         throw new BadRequestException(
           'La suma de anticipo, permuta y financiaciones debe coincidir con el precio del vehículo. Revise los importes.',
         );
@@ -328,6 +373,7 @@ export class BudgetsService {
       prendarioMonths: dto.prendarioMonths ?? undefined,
       personalMonths: dto.personalMonths ?? undefined,
       financiacionMonths: dto.financiacionMonths ?? undefined,
+      motoPlanCode: dto.motoPlanCode ?? null,
     };
 
     // Agregar tasas y montos solo si existen
@@ -429,6 +475,12 @@ export class BudgetsService {
   async getPdf(id: number): Promise<Buffer> {
     const budget = await this.findOneInternal(id);
 
+    const motoPlan = budget.motoPlanCode
+      ? await this.getMotoPlanConfig(budget.motoPlanCode)
+      : null;
+
+    const isMotoPlan = !!motoPlan;
+
     const dir = path.join(__dirname, '../../uploads/budgets', String(budget.id));
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     const filePath = path.join(dir, `presupuesto_${budget.id}.pdf`);
@@ -493,22 +545,71 @@ export class BudgetsService {
     doc.text(
       `Fecha: ${new Date(budget.createdAt).toLocaleDateString('es-AR')}`,
     );
-    if (budget.paymentType) {
-      doc.text(`Forma de Pago: ${budget.paymentType}`);
-    }
-    if (budget.installments) {
-      doc.text(`Cantidad de Cuotas: ${budget.installments}`);
+
+    if (isMotoPlan) {
+      doc.text('Forma de Pago: Plan Motos 0km');
+      doc.text(`Plan seleccionado: ${motoPlan?.name || budget.motoPlanCode}`);
+    } else {
+      if (budget.paymentType) {
+        doc.text(`Forma de Pago: ${budget.paymentType}`);
+      }
+      if (budget.installments) {
+        doc.text(`Cantidad de Cuotas: ${budget.installments}`);
+      }
     }
 
     // Montos principales
     sectionTitle('Detalle de Montos');
-    if (budget.downPayment != null)
-      doc.text(`Anticipo: ${formatPesos(budget.downPayment)}`);
-    if (budget.tradeInValue != null)
-      doc.text(`Valor de Permuta: ${formatPesos(budget.tradeInValue)}`);
-    if (budget.price != null) doc.text(`Precio Lista: ${formatPesos(budget.price)}`);
-    if (budget.installmentValue != null)
-      doc.text(`Valor de Cuota Total: ${formatPesos(budget.installmentValue)}`);
+
+    if (isMotoPlan && motoPlan) {
+      const totalInstallments = Number(
+        motoPlan.totalInstallments ?? motoPlan.installments ?? 0,
+      );
+      const firstInstallmentsCount = Number(
+        motoPlan.firstInstallmentsCount ?? 0,
+      );
+      const firstInstallmentAmount = Number(
+        motoPlan.firstInstallmentAmount ?? 0,
+      );
+      const remainingInstallmentAmount = Number(
+        motoPlan.remainingInstallmentAmount ?? 0,
+      );
+      const remainingCount = Math.max(
+        totalInstallments - firstInstallmentsCount,
+        0,
+      );
+
+      doc.text(`Detalle del ${motoPlan.name}`);
+
+      if (budget.downPayment != null) {
+        doc.text(`Anticipo: ${formatPesos(budget.downPayment)}`);
+      }
+
+      if (firstInstallmentsCount > 0 && firstInstallmentAmount > 0) {
+        doc.text(
+          `Primeras ${firstInstallmentsCount} cuotas: ${formatPesos(firstInstallmentAmount)}`,
+        );
+      }
+
+      if (remainingCount > 0 && remainingInstallmentAmount > 0) {
+        doc.text(
+          `Siguientes ${remainingCount} cuotas: ${formatPesos(remainingInstallmentAmount)}`,
+        );
+      }
+
+      if (totalInstallments > 0) {
+        doc.text(`Total de cuotas: ${totalInstallments}`);
+      }
+    } else {
+      if (budget.downPayment != null)
+        doc.text(`Anticipo: ${formatPesos(budget.downPayment)}`);
+      if (budget.tradeInValue != null)
+        doc.text(`Valor de Permuta: ${formatPesos(budget.tradeInValue)}`);
+      if (budget.price != null)
+        doc.text(`Precio Lista: ${formatPesos(budget.price)}`);
+      if (budget.installmentValue != null)
+        doc.text(`Valor de Cuota Total: ${formatPesos(budget.installmentValue)}`);
+    }
 
     // Detalle de préstamos
     const hasLoans =
@@ -516,7 +617,7 @@ export class BudgetsService {
       !!budget.personalAmount ||
       !!budget.financiacionAmount;
 
-    if (hasLoans) {
+    if (!isMotoPlan && hasLoans) {
       sectionTitle('Detalle de Préstamos y Financiaciones');
 
       const calcConInteres = (montoNeto?: number | null, tasa?: number | null) => {

@@ -15,8 +15,11 @@ export class SettingsController {
   private readonly RESERVATION_AMOUNT_KEY = 'reservation.amount';
   private readonly PERSONAL_MAX_KEY = 'financing.personal.max';
 
-  // ✅ NUEVO
+  // ✅ Monto de devolución de reserva
   private readonly RESERVATION_REFUND_AMOUNT_KEY = 'reservation.refundAmount';
+
+  // 🏍️ Planes de motos
+  private readonly MOTO_PLANS_KEY = 'moto.plans';
 
   constructor(private readonly settings: SettingsService) {}
 
@@ -43,9 +46,9 @@ export class SettingsController {
     return { ok: true, reservationAmount: v };
   }
 
-  // ================================
+  // ======================================
   // 🔹 Límite de Financiación Personal
-  // ================================
+  // ======================================
   @Get('financing/personal-max')
   async getPersonalMax() {
     const maxPersonalAmount = await this.settings.getNumber(
@@ -68,15 +71,14 @@ export class SettingsController {
     return { ok: true, maxPersonalAmount: v };
   }
 
-  // ================================
+  // ======================================
   // 🔹 Monto de Devolución de Reserva
-  //     Clave: reservation.refundAmount
-  // ================================
+  // ======================================
   @Get('reservations/refund-amount')
   async getReservationRefundAmount() {
     const reservationRefundAmount = await this.settings.getNumber(
       this.RESERVATION_REFUND_AMOUNT_KEY,
-      750_000, // 🔹 valor inicial solicitado
+      750_000,
     );
     return { reservationRefundAmount };
   }
@@ -92,5 +94,101 @@ export class SettingsController {
 
     await this.settings.set(this.RESERVATION_REFUND_AMOUNT_KEY, String(v));
     return { ok: true, reservationRefundAmount: v };
+  }
+
+  // ======================================
+  // 🏍️ Planes de motos configurables
+  // ======================================
+  @Get('moto-plans')
+  async getMotoPlans() {
+    const raw = await this.settings.get(this.MOTO_PLANS_KEY);
+
+    if (!raw) {
+      const defaultPlans = [
+        {
+          code: 'A',
+          name: 'Plan A',
+          installments: 12,
+          downPayment: 800000,
+          totalInstallments: 12,
+          firstInstallmentsCount: 3,
+          firstInstallmentAmount: 630000,
+          remainingInstallmentAmount: 300000,
+        },
+        {
+          code: 'B',
+          name: 'Plan B',
+          installments: 14,
+          downPayment: 0,
+          totalInstallments: 14,
+          firstInstallmentsCount: 3,
+          firstInstallmentAmount: 630000,
+          remainingInstallmentAmount: 340000,
+        },
+        {
+          code: 'C',
+          name: 'Plan C',
+          installments: 18,
+          downPayment: 0,
+          totalInstallments: 18,
+          firstInstallmentsCount: 0,
+          firstInstallmentAmount: 0,
+          remainingInstallmentAmount: 350000,
+        },
+      ];
+
+      await this.settings.set(
+        this.MOTO_PLANS_KEY,
+        JSON.stringify(defaultPlans),
+      );
+
+      return defaultPlans;
+    }
+
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  @Patch('moto-plans')
+  async setMotoPlans(
+    @Body()
+    body: {
+      plans: {
+        code: string;
+        name: string;
+        installments: number;
+        downPayment?: number;
+        totalInstallments?: number;
+        firstInstallmentsCount?: number;
+        firstInstallmentAmount?: number;
+        remainingInstallmentAmount?: number;
+      }[];
+    },
+  ) {
+    if (!Array.isArray(body?.plans)) {
+      throw new BadRequestException('Formato inválido de planes');
+    }
+
+    const normalized = body.plans.map((p) => ({
+      code: String(p.code || '').trim(),
+      name: String(p.name || '').trim(),
+      installments: Number(p.installments ?? 0),
+      downPayment: Number(p.downPayment ?? 0),
+      totalInstallments: Number(p.totalInstallments ?? p.installments ?? 0),
+      firstInstallmentsCount: Number(p.firstInstallmentsCount ?? 0),
+      firstInstallmentAmount: Number(p.firstInstallmentAmount ?? 0),
+      remainingInstallmentAmount: Number(p.remainingInstallmentAmount ?? 0),
+    }));
+
+    await this.settings.set(
+      this.MOTO_PLANS_KEY,
+      JSON.stringify(normalized),
+    );
+
+    return { ok: true, plans: normalized };
   }
 }

@@ -7,6 +7,7 @@
   IsString,
   Min,
   MaxLength,
+  IsIn,
 } from 'class-validator';
 
 export class CreateSaleDto {
@@ -99,4 +100,13 @@ export class CreateSaleDto {
   @IsString()
   @IsNotEmpty()
   initialPaymentMonth: string; // "YYYY-MM"
+
+  // 🏍️ Plan motos 0km
+  @IsOptional()
+  @IsIn(['contado', 'anticipo_financiacion', 'plan_motos_0km'])
+  paymentType?: 'contado' | 'anticipo_financiacion' | 'plan_motos_0km';
+
+  @IsOptional()
+  @IsString()
+  motoPlanCode?: string;
 }

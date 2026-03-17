@@ -71,6 +71,9 @@ export class Vehicle {
   @Column({ length: 100 })
   chassisNumber: string;
 
+@Column({ type: 'boolean', default: false })
+isMotoPlan: boolean;
+
   // ✅ NUEVO: Concesionaria (después de N° chasis)
   @Column({ type: 'varchar', length: 10, nullable: true })
   concesionaria: 'DG' | 'SyS' | null;

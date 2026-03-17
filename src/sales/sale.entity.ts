@@ -126,6 +126,14 @@ export class Sale {
   @Column('simple-json', { nullable: true })
   paymentComposition: PaymentComposition | null;
 
+  // 🏍️ Tipo de venta
+  @Column({ type: 'varchar', length: 32, nullable: true })
+  paymentType: string | null;
+
+  // 🏍️ Código plan motos
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  motoPlanCode: string | null;
+
   // 📆 Relación con cuotas (opcional)
   @OneToMany(() => Installment, (installment) => installment.sale, {
     cascade: true,

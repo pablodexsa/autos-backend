@@ -13,6 +13,7 @@ import { VehiclesModule } from '../vehicles/vehicles.module';
 import { LoanRate } from '../loan-rates/loan-rate.entity';
 import { AuditModule } from '../audit/audit.module'; // 👈 NUEVO
 import { MailModule } from '../mail/mail.module'; // ✅ NUEVO
+import { SettingsModule } from '../settings/settings.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { MailModule } from '../mail/mail.module'; // ✅ NUEVO
     forwardRef(() => VehiclesModule),
     AuditModule, // 👈 SE AGREGA AQUÍ
     MailModule, // ✅ para poder inyectar MailService en SalesService
+    SettingsModule,
   ],
   controllers: [SalesController],
   providers: [SalesService],

@@ -152,6 +152,7 @@ export class VehiclesService {
       price: dto.price,
       status: dto.status,
 
+      isMotoPlan: dto.isMotoPlan ?? false,
       isActive: true,
     });
 
@@ -326,6 +327,7 @@ export class VehiclesService {
     if (dto.color !== undefined) v.color = dto.color;
     if (dto.price !== undefined) v.price = dto.price as any;
     if (dto.status !== undefined) v.status = dto.status;
+    if (dto.isMotoPlan !== undefined) v.isMotoPlan = dto.isMotoPlan;
 
     const saved = await this.repo.save(v);
     this.notify('updated', saved.id);

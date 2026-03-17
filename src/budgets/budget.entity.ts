@@ -38,6 +38,9 @@ export class Budget {
   @Column({ nullable: true })
   paymentType: string;
 
+@Column({ nullable: true })
+motoPlanCode: string;
+
   @Column({ default: 'pending' })
   status: string;
 

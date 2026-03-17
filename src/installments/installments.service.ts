@@ -4,7 +4,7 @@
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, FindOptionsWhere } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import {
   Installment,
   InstallmentReceiver,
@@ -64,12 +64,10 @@ export class InstallmentsService {
 
   // 📋 Listar todas las cuotas
   async findAll() {
-    const where: FindOptionsWhere<Installment> = {
-      concept: 'PERSONAL_FINANCING',
-    };
-
     const installments = await this.installmentsRepository.find({
-      where,
+      where: {
+        concept: In(['PERSONAL_FINANCING', 'MOTO_PLAN']),
+      },
       relations: [
         'sale',
         'sale.client',
@@ -83,15 +81,21 @@ export class InstallmentsService {
 
     const labelByInstallmentId = new Map<number, string>();
 
-    const bySale = new Map<number, any[]>();
+    // agrupamos por venta + concepto para que
+    // financiación personal y plan motos lleven su propia numeración
+    const bySaleAndConcept = new Map<string, any[]>();
+
     for (const inst of installments as any[]) {
       const sid = inst.sale?.id;
+      const concept = inst.concept || 'UNKNOWN';
       if (!sid) continue;
-      if (!bySale.has(sid)) bySale.set(sid, []);
-      bySale.get(sid)!.push(inst);
+
+      const key = `${sid}-${concept}`;
+      if (!bySaleAndConcept.has(key)) bySaleAndConcept.set(key, []);
+      bySaleAndConcept.get(key)!.push(inst);
     }
 
-    for (const [, list] of bySale.entries()) {
+    for (const [, list] of bySaleAndConcept.entries()) {
       const ordered = [...list].sort(
         (a: any, b: any) =>
           new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime(),

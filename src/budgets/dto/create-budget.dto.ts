@@ -75,4 +75,9 @@ export class CreateBudgetDto {
   @IsOptional()
   @IsNumber()
   financiacionAmount?: number;
+
+@IsOptional()
+@IsString()
+motoPlanCode?: string;
+
 }

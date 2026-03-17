@@ -7,6 +7,7 @@
   Length,
   IsOptional,
   Min,
+  IsBoolean,
 } from 'class-validator';
 
 export class CreateVehicleDto {
@@ -39,6 +40,10 @@ export class CreateVehicleDto {
   @IsString()
   @Length(1, 100)
   chassisNumber: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isMotoPlan?: boolean;
 
   // ✅ NUEVO: Concesionaria
   @IsOptional()

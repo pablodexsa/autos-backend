@@ -2,6 +2,7 @@
   Injectable,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
@@ -10,34 +11,48 @@ import { CreateSaleDto } from './dto/create-sale.dto';
 import { Vehicle } from '../vehicles/vehicle.entity';
 import { Reservation } from '../reservations/reservation.entity';
 import { Installment } from '../installments/installment.entity';
+import {
+  InstallmentReceiver,
+  InstallmentStatus,
+} from '../installments/installment.entity';
 import { Client } from '../clients/entities/client.entity';
-import { LoanRate } from '../loan-rates/loan-rate.entity'; // 🆕 import tasas
-import PDFDocument from 'pdfkit'; // ✅ Import corregido
+import { LoanRate } from '../loan-rates/loan-rate.entity';
+import PDFDocument from 'pdfkit';
 import * as fs from 'fs';
 import * as path from 'path';
-import { MailService } from '../mail/mail.service'; // ✅ NUEVO (email)
-
-function pmnt(p: number, r: number, n: number) {
-  // Fórmula de amortización (cuota fija)
-  if (r === 0) return p / n;
-  return (p * r) / (1 - Math.pow(1 + r, -n));
-}
+import { MailService } from '../mail/mail.service';
+import { SettingsService } from '../settings/settings.service';
 
 function yyyymmToDate(yyyymm: string, day: number): Date {
   const [y, m] = yyyymm.split('-').map(Number);
   return new Date(y, m - 1, day, 12, 0, 0);
 }
 
+type MotoPlanConfig = {
+  code: string;
+  name: string;
+  installments: number;
+  downPayment?: number;
+  totalInstallments?: number;
+  firstInstallmentsCount?: number;
+  firstInstallmentAmount?: number;
+  remainingInstallmentAmount?: number;
+};
+
 @Injectable()
 export class SalesService {
   constructor(
     @InjectRepository(Sale) private readonly salesRepo: Repository<Sale>,
     @InjectRepository(Vehicle) private readonly vehicleRepo: Repository<Vehicle>,
-    @InjectRepository(Reservation) private readonly resRepo: Repository<Reservation>,
-    @InjectRepository(Installment) private readonly instRepo: Repository<Installment>,
+    @InjectRepository(Reservation)
+    private readonly resRepo: Repository<Reservation>,
+    @InjectRepository(Installment)
+    private readonly instRepo: Repository<Installment>,
     @InjectRepository(Client) private readonly clientRepo: Repository<Client>,
-    @InjectRepository(LoanRate) private readonly loanRateRepo: Repository<LoanRate>, // 🆕 repo tasas
-    private readonly mailService: MailService, // ✅ NUEVO
+    @InjectRepository(LoanRate)
+    private readonly loanRateRepo: Repository<LoanRate>,
+    private readonly mailService: MailService,
+    private readonly settingsService: SettingsService,
   ) {}
 
   // 🔐 Helper: categorías permitidas según permisos del usuario (legacy + scoped)
@@ -81,7 +96,9 @@ export class SalesService {
   async eligibleVehiclesForDni(user: any, dni?: string) {
     const allowed = this.getAllowedCategories(user);
     if (!allowed.length) {
-      throw new ForbiddenException('No tenés permisos para acceder a vehículos.');
+      throw new ForbiddenException(
+        'No tenés permisos para acceder a vehículos.',
+      );
     }
 
     const availableAll = await this.vehicleRepo.find({
@@ -94,7 +111,6 @@ export class SalesService {
 
     if (!dni) return available;
 
-    // Buscar reservas aceptadas por cliente
     const acceptedRes = await this.resRepo.find({
       where: {
         client: { dni },
@@ -113,34 +129,165 @@ export class SalesService {
     return Array.from(map.values());
   }
 
+  // 🏍️ Lee planes de motos desde settings
+  private async getMotoPlans(): Promise<MotoPlanConfig[]> {
+    const raw = await this.settingsService.get('moto.plans');
+    if (!raw) return [];
+
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  // 🏍️ Busca un plan puntual por código
+  private async getMotoPlanConfig(
+    code?: string | null,
+  ): Promise<MotoPlanConfig | null> {
+    if (!code) return null;
+
+    const plans = await this.getMotoPlans();
+    const plan = plans.find((p) => String(p.code) === String(code));
+
+    return plan ?? null;
+  }
+
+  // 🏍️ Genera cuotas del plan motos
+  private async createMotoPlanInstallments(
+    sale: Sale,
+    client: Client,
+    dto: CreateSaleDto,
+    plan: MotoPlanConfig,
+  ) {
+    const paymentDay = Number(dto.paymentDay);
+    if (!paymentDay || !dto.initialPaymentMonth) {
+      throw new BadRequestException(
+        'Plan motos requiere paymentDay e initialPaymentMonth.',
+      );
+    }
+
+    const baseDate = yyyymmToDate(dto.initialPaymentMonth, paymentDay);
+
+    const downPayment = Number(plan.downPayment ?? 0);
+    const totalInstallments = Number(
+      plan.totalInstallments ?? plan.installments ?? 0,
+    );
+    const firstInstallmentsCount = Number(plan.firstInstallmentsCount ?? 0);
+    const firstInstallmentAmount = Number(plan.firstInstallmentAmount ?? 0);
+    const remainingInstallmentAmount = Number(
+      plan.remainingInstallmentAmount ?? 0,
+    );
+
+    if (totalInstallments <= 0) {
+      throw new BadRequestException(
+        `El plan ${plan.name} no tiene cuotas válidas configuradas.`,
+      );
+    }
+
+    if (firstInstallmentsCount > totalInstallments) {
+      throw new BadRequestException(
+        `El plan ${plan.name} tiene más cuotas iniciales que cuotas totales.`,
+      );
+    }
+
+    for (let i = 0; i < totalInstallments; i++) {
+      const due = new Date(
+        baseDate.getFullYear(),
+        baseDate.getMonth() + i,
+        paymentDay,
+        12,
+        0,
+        0,
+      );
+
+      const amount =
+        i < firstInstallmentsCount
+          ? firstInstallmentAmount
+          : remainingInstallmentAmount;
+
+      const inst = this.instRepo.create({
+        sale,
+        saleId: sale.id,
+        client,
+        clientId: client.id,
+        concept: 'MOTO_PLAN',
+        amount,
+        remainingAmount: amount,
+        dueDate: due,
+        paid: false,
+        status: InstallmentStatus.PENDING,
+        installmentNumber: i + 1,
+        totalInstallments,
+        receiver: InstallmentReceiver.AGENCY,
+      } as Partial<Installment>);
+
+      await this.instRepo.save(inst);
+    }
+
+    // El anticipo no se genera como cuota.
+    // Se guarda en sale.downPayment y aparece en el comprobante.
+    if (downPayment < 0) {
+      throw new BadRequestException(
+        `El plan ${plan.name} tiene un anticipo inválido.`,
+      );
+    }
+  }
+
   // 🧾 Crear nueva venta (VALIDA categoría)
-  async create(dto: CreateSaleDto, user: any, sellerId?: number, sellerName?: string) {
-    const vehicle = await this.vehicleRepo.findOne({ where: { id: dto.vehicleId } });
+  async create(
+    dto: CreateSaleDto,
+    user: any,
+    sellerId?: number,
+    sellerName?: string,
+  ) {
+    const vehicle = await this.vehicleRepo.findOne({
+      where: { id: dto.vehicleId },
+    });
     if (!vehicle) throw new NotFoundException('Vehicle not found');
 
-    // 🔐 Blindaje por categoría (autos/motos)
     this.assertCanAccessVehicleCategory(user, (vehicle as any)?.category);
 
-    const client = await this.clientRepo.findOne({ where: { dni: dto.clientDni } });
+    const client = await this.clientRepo.findOne({
+      where: { dni: dto.clientDni },
+    });
 
-    // ✅ VALIDACIÓN A AGREGAR ACÁ
     const inHouseAmount = Number(dto.inHouseAmount ?? 0);
     const inHouseInstallments = Number(dto.inHouseInstallments ?? 0);
 
-    if (inHouseAmount > 0 && inHouseInstallments > 0 && !client) {
+    const isMotoPlan = dto.paymentType === 'plan_motos_0km';
+
+    if (
+      (inHouseAmount > 0 && inHouseInstallments > 0 && !client) ||
+      (isMotoPlan && !client)
+    ) {
       throw new NotFoundException('Client not found');
     }
-    // 🔚 FIN VALIDACIÓN
+
+    let motoPlan: MotoPlanConfig | null = null;
+    if (isMotoPlan) {
+      if (!dto.motoPlanCode) {
+        throw new BadRequestException(
+          'Debe indicar el código del plan de motos.',
+        );
+      }
+
+      motoPlan = await this.getMotoPlanConfig(dto.motoPlanCode);
+      if (!motoPlan) {
+        throw new NotFoundException('Moto plan not found');
+      }
+    }
 
     const sale = this.salesRepo.create({
       ...dto,
+      paymentType: dto.paymentType ?? 'contado',
+      motoPlanCode: dto.motoPlanCode ?? null,
       client: client ?? undefined,
 
-      // 🧑‍💼 Vendedor
       sellerId: sellerId ?? null,
       sellerName: sellerName ?? null,
 
-      // 👇 mapeamos explícitamente los campos de permuta
       hasTradeIn: dto.hasTradeIn,
       tradeInValue: dto.tradeInValue,
       tradeInPlate: dto.tradeInPlate ?? null,
@@ -163,25 +310,26 @@ export class SalesService {
     vehicle.status = 'Sold';
     await this.vehicleRepo.save(vehicle);
 
-    // 💳 Generar plan de pagos (financiación interna)
-
-    // 1) tasa: si el front manda 0, buscamos la del plan en loan_rates
+    // 💳 Generar cuotas de financiación personal
     const planRatePercent =
       Number(dto.inHouseMonthlyRate ?? 0) ||
-      (await this.getRate('financiacion', inHouseInstallments)); // devuelve % (ej: 115)
+      (await this.getRate('financiacion', inHouseInstallments));
 
-    // 2) monto total con interés, consistente con el preview del front
     const totalWithInterest =
       planRatePercent > 0
         ? inHouseAmount * (1 + planRatePercent / 100)
         : inHouseAmount;
 
-    // 3) valor de cuota: total con interés / cantidad de cuotas
-    const installmentValue = parseFloat(
-      (totalWithInterest / inHouseInstallments).toFixed(2),
-    );
+    const installmentValue =
+      inHouseInstallments > 0
+        ? parseFloat((totalWithInterest / inHouseInstallments).toFixed(2))
+        : 0;
 
-    if (inHouseAmount > 0 && inHouseInstallments > 0) {
+    if (
+      dto.paymentType !== 'plan_motos_0km' &&
+      inHouseAmount > 0 &&
+      inHouseInstallments > 0
+    ) {
       const baseDate = yyyymmToDate(dto.initialPaymentMonth, dto.paymentDay);
 
       for (let i = 0; i < inHouseInstallments; i++) {
@@ -197,36 +345,31 @@ export class SalesService {
         const inst = this.instRepo.create({
           sale: saved,
           saleId: saved.id,
-
-          client: client!, // importante para que quede clientId
+          client: client!,
           clientId: client!.id,
-
           concept: 'PERSONAL_FINANCING',
-
-          // Monto original de la cuota
           amount: installmentValue,
-
-          // ✅ Saldo pendiente inicial = monto original
           remainingAmount: installmentValue,
-
           dueDate: due,
-
-          // ✅ Estado inicial
           paid: false,
-          status: 'PENDING',
-
-          // ✅ Datos de posición dentro del plan
+          status: InstallmentStatus.PENDING,
           installmentNumber: i + 1,
           totalInstallments: inHouseInstallments,
+          receiver: InstallmentReceiver.AGENCY,
         } as Partial<Installment>);
 
         await this.instRepo.save(inst);
       }
     }
 
-    // ✅ Opción B: enviar email SOLO al crear la venta
+    // 🏍️ Generar cuotas del plan motos
+    if (isMotoPlan && client && motoPlan) {
+      await this.createMotoPlanInstallments(saved, client, dto, motoPlan);
+    }
+
     try {
-      const clientEmail = (saved as any)?.client?.email || (client as any)?.email;
+      const clientEmail =
+        (saved as any)?.client?.email || (client as any)?.email;
 
       if (clientEmail) {
         const pdfBuffer = await this.getPdf(saved.id);
@@ -246,7 +389,7 @@ export class SalesService {
             <li><strong>Venta Nº:</strong> ${saved.id}</li>
             <li><strong>Vehículo:</strong> ${vehicleLabel}</li>
             <li><strong>Fecha:</strong> ${new Date(saved.createdAt).toLocaleDateString('es-AR')}</li>
-            <li><strong>Forma de pago:</strong> ${this.labelPayment(saved.paymentComposition) || '-'}</li>
+            <li><strong>Forma de pago:</strong> ${this.labelPayment(saved.paymentComposition, saved.paymentType) || '-'}</li>
           </ul>
 
           <p>Adjunto vas a encontrar el PDF del comprobante.</p>
@@ -267,7 +410,9 @@ export class SalesService {
 
         console.log('✅ Venta enviada por email a:', clientEmail);
       } else {
-        console.warn(`⚠️ La venta ${saved.id} no tiene email de cliente cargado.`);
+        console.warn(
+          `⚠️ La venta ${saved.id} no tiene email de cliente cargado.`,
+        );
       }
     } catch (err) {
       console.error(
@@ -318,17 +463,13 @@ export class SalesService {
     return sale;
   }
 
-  // 🆕 Helper: obtener tasa desde la tabla loan_rates, aplicando tramos 1–12 / 13–24 / 25–36
+  // 🆕 Helper: obtener tasa desde loan_rates
   private async getRate(
     type: 'prendario' | 'personal' | 'financiacion',
     months?: number | null,
   ): Promise<number> {
     if (!months) return 0;
 
-    // Normalizamos la cantidad real de cuotas al tramo configurado:
-    // 1–12  -> usa la tasa de 12
-    // 13–24 -> usa la tasa de 24
-    // 25–36 -> usa la tasa de 36
     let bracket: number;
     if (months <= 12) {
       bracket = 12;
@@ -337,7 +478,6 @@ export class SalesService {
     } else if (months <= 36) {
       bracket = 36;
     } else {
-      // Fuera del rango soportado, no aplicamos tasa
       return 0;
     }
 
@@ -347,9 +487,16 @@ export class SalesService {
     return row?.rate ?? 0;
   }
 
-  // 🖨️ Generar comprobante de venta profesional (SOLO GENERA, NO ENVÍA EMAIL)
+  // 🖨️ PDF
   async getPdf(id: number): Promise<Buffer> {
     const sale = await this.findOneInternal(id);
+
+    const motoPlan =
+      sale.paymentType === 'plan_motos_0km' && sale.motoPlanCode
+        ? await this.getMotoPlanConfig(sale.motoPlanCode)
+        : null;
+
+    const isMotoPlan = !!motoPlan;
 
     const dir = path.join(__dirname, '../../uploads/sales', String(sale.id));
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -374,7 +521,6 @@ export class SalesService {
       console.warn('⚠️ No se pudo cargar el logo de marca de agua');
     }
 
-    // 🏷️ Encabezado
     doc
       .fontSize(22)
       .fillColor('#1e1e1e')
@@ -393,7 +539,6 @@ export class SalesService {
     doc.moveTo(50, doc.y).lineTo(550, doc.y).strokeColor('#009879').stroke();
     doc.moveDown(1);
 
-    // Helpers
     const sectionTitle = (t: string) => {
       doc.moveDown(0.6);
       doc
@@ -412,31 +557,87 @@ export class SalesService {
       })}`;
     };
 
-    // 📋 Datos de la venta
     sectionTitle('Datos de la Venta');
     doc.text(`Número: ${sale.id}`);
     doc.text(`Fecha: ${new Date(sale.createdAt).toLocaleDateString('es-AR')}`);
     doc.text(
-      `Forma de Pago: ${this.labelPayment(sale.paymentComposition) || '-'}`,
+      `Forma de Pago: ${this.labelPayment(sale.paymentComposition, sale.paymentType) || '-'}`,
     );
-    if (sale.personalInstallments)
-      doc.text(`Cantidad de Cuotas Totales: ${sale.personalInstallments}`);
-    doc.text(`Día de Pago: ${sale.paymentDay}`);
-    doc.text(`Mes Inicial de Pago: ${sale.initialPaymentMonth}`);
 
-    // 💸 Montos principales
+    if (isMotoPlan && motoPlan) {
+      const totalInstallments = Number(
+        motoPlan.totalInstallments ?? motoPlan.installments ?? 0,
+      );
+
+      if (totalInstallments > 0) {
+        doc.text(`Cantidad de Cuotas Totales: ${totalInstallments}`);
+      }
+
+      doc.text(`Día de Pago: ${sale.paymentDay}`);
+      doc.text(`Mes Inicial de Pago: ${sale.initialPaymentMonth}`);
+      doc.text(`Plan seleccionado: ${motoPlan.name || sale.motoPlanCode}`);
+    } else {
+      if (sale.personalInstallments) {
+        doc.text(`Cantidad de Cuotas Totales: ${sale.personalInstallments}`);
+      }
+      doc.text(`Día de Pago: ${sale.paymentDay}`);
+      doc.text(`Mes Inicial de Pago: ${sale.initialPaymentMonth}`);
+    }
+
     sectionTitle('Detalle de Montos');
-    if (sale.downPayment != null)
-      doc.text(`Anticipo: ${formatPesos(sale.downPayment)}`);
-    if (sale.tradeInValue != null)
-      doc.text(`Valor de Permuta: ${formatPesos(sale.tradeInValue)}`);
-    if (sale.basePrice != null) doc.text(`Precio Lista: ${formatPesos(sale.basePrice)}`);
-    if (sale.balance != null)
-      doc.text(`Saldo (vehículo - permuta): ${formatPesos(sale.balance)}`);
-    if (sale.finalPrice != null)
-      doc.text(`Precio Final de Venta: ${formatPesos(sale.finalPrice)}`);
 
-    // 🧮 Tasas y montos con financiación (similar al preview)
+    if (isMotoPlan && motoPlan) {
+      const totalInstallments = Number(
+        motoPlan.totalInstallments ?? motoPlan.installments ?? 0,
+      );
+      const firstInstallmentsCount = Number(
+        motoPlan.firstInstallmentsCount ?? 0,
+      );
+      const firstInstallmentAmount = Number(
+        motoPlan.firstInstallmentAmount ?? 0,
+      );
+      const remainingInstallmentAmount = Number(
+        motoPlan.remainingInstallmentAmount ?? 0,
+      );
+      const remainingCount = Math.max(
+        totalInstallments - firstInstallmentsCount,
+        0,
+      );
+
+      doc.text(`Detalle del ${motoPlan.name}`);
+
+      if (sale.downPayment != null) {
+        doc.text(`Anticipo: ${formatPesos(sale.downPayment)}`);
+      }
+
+      if (firstInstallmentsCount > 0 && firstInstallmentAmount > 0) {
+        doc.text(
+          `Primeras ${firstInstallmentsCount} cuotas: ${formatPesos(firstInstallmentAmount)}`,
+        );
+      }
+
+      if (remainingCount > 0 && remainingInstallmentAmount > 0) {
+        doc.text(
+          `Siguientes ${remainingCount} cuotas: ${formatPesos(remainingInstallmentAmount)}`,
+        );
+      }
+
+      if (totalInstallments > 0) {
+        doc.text(`Total de cuotas: ${totalInstallments}`);
+      }
+    } else {
+      if (sale.downPayment != null)
+        doc.text(`Anticipo: ${formatPesos(sale.downPayment)}`);
+      if (sale.tradeInValue != null)
+        doc.text(`Valor de Permuta: ${formatPesos(sale.tradeInValue)}`);
+      if (sale.basePrice != null)
+        doc.text(`Precio Lista: ${formatPesos(sale.basePrice)}`);
+      if (sale.balance != null)
+        doc.text(`Saldo (vehículo - permuta): ${formatPesos(sale.balance)}`);
+      if (sale.finalPrice != null)
+        doc.text(`Precio Final de Venta: ${formatPesos(sale.finalPrice)}`);
+    }
+
     const nPrendario = sale.prendarioInstallments ?? 0;
     const nPersonal = sale.personalInstallments ?? 0;
     const nFinanc = sale.inHouseInstallments ?? 0;
@@ -482,7 +683,7 @@ export class SalesService {
     const hasLoans =
       !!sale.prendarioAmount || !!sale.personalAmount || !!sale.inHouseAmount;
 
-    if (hasLoans) {
+    if (!isMotoPlan && hasLoans) {
       sectionTitle('Detalle de Préstamos y Financiaciones');
 
       if (valorCuotaTotalConInteres > 0) {
@@ -505,7 +706,9 @@ export class SalesService {
         doc.text(`Cuotas: ${sale.prendarioInstallments ?? '-'}`);
         if (prendarioConInteres > 0 && nPrendario > 0) {
           const cuota = prendarioConInteres / nPrendario;
-          doc.text(`Valor de cada cuota (con financiación): ${formatPesos(cuota)}`);
+          doc.text(
+            `Valor de cada cuota (con financiación): ${formatPesos(cuota)}`,
+          );
         }
       }
 
@@ -520,7 +723,9 @@ export class SalesService {
         doc.text(`Cuotas: ${sale.personalInstallments ?? '-'}`);
         if (personalConInteres > 0 && nPersonal > 0) {
           const cuota = personalConInteres / nPersonal;
-          doc.text(`Valor de cada cuota (con financiación): ${formatPesos(cuota)}`);
+          doc.text(
+            `Valor de cada cuota (con financiación): ${formatPesos(cuota)}`,
+          );
         }
       }
 
@@ -535,7 +740,9 @@ export class SalesService {
         doc.text(`Cuotas: ${sale.inHouseInstallments ?? '-'}`);
         if (financiacionConInteres > 0 && nFinanc > 0) {
           const cuota = financiacionConInteres / nFinanc;
-          doc.text(`Valor de cada cuota (con financiación): ${formatPesos(cuota)}`);
+          doc.text(
+            `Valor de cada cuota (con financiación): ${formatPesos(cuota)}`,
+          );
         }
       }
 
@@ -560,12 +767,10 @@ export class SalesService {
       }
     }
 
-    // 👤 Cliente
     sectionTitle('Cliente');
     doc.text(`Nombre: ${sale.clientName}`);
     doc.text(`DNI: ${sale.clientDni}`);
 
-    // 🚗 Vehículo
     if (sale.vehicle) {
       sectionTitle('Vehículo');
       doc.text(
@@ -576,7 +781,6 @@ export class SalesService {
       if (sale.vehicle.plate) doc.text(`Patente: ${sale.vehicle.plate}`);
     }
 
-    // ⚖️ Condiciones legales
     doc.moveDown(2);
     doc.moveTo(50, doc.y).lineTo(550, doc.y).strokeColor('#ccc').stroke();
     doc.moveDown(1);
@@ -602,13 +806,19 @@ export class SalesService {
     return pdfBuffer;
   }
 
-  // 👇 NUEVA LÓGICA DE ETIQUETA DE FORMA DE PAGO PARA EL PDF
-  private labelPayment(comp?: {
-    hasAdvance?: boolean;
-    hasPrendario?: boolean;
-    hasPersonal?: boolean;
-    hasFinancing?: boolean;
-  } | null): string {
+  private labelPayment(
+    comp?: {
+      hasAdvance?: boolean;
+      hasPrendario?: boolean;
+      hasPersonal?: boolean;
+      hasFinancing?: boolean;
+    } | null,
+    paymentType?: string | null,
+  ): string {
+    if (paymentType === 'plan_motos_0km') {
+      return 'Plan Motos 0km';
+    }
+
     if (!comp) return '-';
 
     const hasAnyFinancing =
