@@ -101,9 +101,12 @@ export class SalesService {
       );
     }
 
-    const availableAll = await this.vehicleRepo.find({
-      where: { status: In(['Available', 'available']) },
-    });
+const availableAll = await this.vehicleRepo.find({
+  where: {
+    status: In(['Available', 'available']),
+    isActive: true,
+  },
+});
 
     const available = availableAll.filter((v: any) =>
       allowed.includes(((v as any).category || 'CAR') as any),
