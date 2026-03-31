@@ -246,22 +246,34 @@ export class DirectoPortalProvider implements DirectoProvider {
         const upper = line.toUpperCase() === line;
         const hasLetters = /[A-ZÁÉÍÓÚÑ]/.test(line);
 
-        const blacklist = [
-          'CONTINUAR',
-          'VOLVER',
-          'DNI',
-          'GÉNERO',
-          'GENERO',
-          'TIPO DE VENTA',
-          'MOTO',
-          'LO SENTIMOS',
-          'OFERTA',
-          'VALIDÁ LA IDENTIDAD DE TU CLIENTE',
-          'VALIDA LA IDENTIDAD DE TU CLIENTE',
-          'NO ES EL NOMBRE DE MI CLIENTE',
-        ];
+const blacklist = [
+  'CONTINUAR',
+  'VOLVER',
+  'DNI',
+  'GÉNERO',
+  'GENERO',
+  'TIPO DE VENTA',
+  'MOTO',
+  'MOTO ESPECIAL',
+  'LO SENTIMOS',
+  'OFERTA',
+  'OFERTA PARA TU CLIENTE',
+  'MONTO',
+  'MONTO MÁXIMO',
+  'TU CLIENTE PUEDE ACCEDER',
+  'PODÉS CONTINUAR',
+  'PODES CONTINUAR',
+  'VALIDÁ LA IDENTIDAD DE TU CLIENTE',
+  'VALIDA LA IDENTIDAD DE TU CLIENTE',
+  'NO ES EL NOMBRE DE MI CLIENTE',
+];
 
-        return upper && hasLetters && !blacklist.includes(line.toUpperCase());
+return (
+  upper &&
+  hasLetters &&
+  line.includes(' ') &&
+  !blacklist.includes(line.toUpperCase())
+);
       }) || null;
 
     await this.clickFirst(page, [
