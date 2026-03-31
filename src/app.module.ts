@@ -37,6 +37,7 @@ import { MailModule } from './mail/mail.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { DirectoModule } from './directo/directo.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { CuotaRedModule } from './cuotared/cuotared.module';
 
 // 📦 Entidades
 import { User } from './users/user.entity';
@@ -126,6 +127,7 @@ import { RolePermission } from './permissions/role-permission.entity';
     RefundsModule,
     DirectoModule,
     DashboardModule,
+    CuotaRedModule,
   ],
   controllers: [AppController],
   providers: [
