@@ -9,6 +9,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ReservationsModule } from './reservations/reservations.module';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AuditInterceptor } from './audit/audit.interceptor';
+import { HealthController } from './health/health.controller';
 
 // ✅ NUEVO
 import { RefundsModule } from './refunds/refunds.module';
@@ -129,7 +130,7 @@ import { RolePermission } from './permissions/role-permission.entity';
     DashboardModule,
     CuotaRedModule,
   ],
-  controllers: [AppController],
+  controllers: [AppController, HealthController],
   providers: [
     AppService,
     {
