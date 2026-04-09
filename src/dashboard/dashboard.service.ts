@@ -270,6 +270,12 @@ export class DashboardService {
       FROM installments
     `);
 
+    const [currentMonthInstallmentsRow, nextMonthInstallmentsRow] =
+      await Promise.all([
+        this.getInstallmentsMonthTotals(0),
+        this.getInstallmentsMonthTotals(1),
+      ]);
+
     let monthlySalesCount = 0;
     let monthlySalesAmount = 0;
 
@@ -346,6 +352,19 @@ export class DashboardService {
       ),
       receivablesBacklogAmount: Number(
         installments.receivablesBacklogAmount ?? 0,
+      ),
+
+      currentMonthInstallmentsCount: Number(
+        currentMonthInstallmentsRow?.count ?? 0,
+      ),
+      currentMonthInstallmentsAmount: Number(
+        currentMonthInstallmentsRow?.amount ?? 0,
+      ),
+      nextMonthInstallmentsCount: Number(
+        nextMonthInstallmentsRow?.count ?? 0,
+      ),
+      nextMonthInstallmentsAmount: Number(
+        nextMonthInstallmentsRow?.amount ?? 0,
       ),
     };
   }
@@ -487,7 +506,8 @@ export class DashboardService {
           WHERE COALESCE("remainingAmount", 0) > 0
         )::int AS "unpaidCount"
       FROM installments
-      WHERE "dueDate" >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
+      WHERE "dueDate" >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '5 months'
+        AND "dueDate" < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '7 months'
       GROUP BY DATE_TRUNC('month', "dueDate")
       ORDER BY DATE_TRUNC('month', "dueDate")
     `);
@@ -501,7 +521,7 @@ export class DashboardService {
       unpaidCount: Number(row.unpaidCount ?? 0),
     }));
 
-    return this.mergeInstallmentsByDueMonthWithLast12Months(mapped);
+    return this.mergeInstallmentsByDueMonthWithDashboardWindow(mapped);
   }
 
   private async getReceivablesAging(): Promise<DashboardAgingDto[]> {
@@ -601,6 +621,28 @@ export class DashboardService {
     }));
   }
 
+  private async getInstallmentsMonthTotals(monthOffset: number): Promise<{
+    count: number;
+    amount: number;
+  }> {
+    const rows = await this.dataSource.query(
+      `
+      SELECT
+        COUNT(*)::int AS count,
+        COALESCE(SUM("amount"), 0)::numeric AS amount
+      FROM installments
+      WHERE "dueDate" >= (DATE_TRUNC('month', CURRENT_DATE) + ($1 * INTERVAL '1 month'))
+        AND "dueDate" < (DATE_TRUNC('month', CURRENT_DATE) + (($1 + 1) * INTERVAL '1 month'))
+      `,
+      [monthOffset],
+    );
+
+    return {
+      count: Number(rows?.[0]?.count ?? 0),
+      amount: Number(rows?.[0]?.amount ?? 0),
+    };
+  }
+
   private buildEmptyLast12MonthsSeries(): DashboardMonthlySeriesDto[] {
     const months = this.getLast12Months();
     return months.map((month) => ({
@@ -623,10 +665,10 @@ export class DashboardService {
     }));
   }
 
-  private mergeInstallmentsByDueMonthWithLast12Months(
+  private mergeInstallmentsByDueMonthWithDashboardWindow(
     rows: DashboardInstallmentsByDueMonthDto[],
   ): DashboardInstallmentsByDueMonthDto[] {
-    const months = this.getLast12Months();
+    const months = this.getInstallmentsDashboardMonths();
     const map = new Map(rows.map((item) => [item.month, item]));
 
     return months.map((month) => ({
@@ -645,6 +687,27 @@ export class DashboardService {
 
     for (let i = 11; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      months.push(`${year}-${month}`);
+    }
+
+    return months;
+  }
+
+  private getInstallmentsDashboardMonths(): string[] {
+    const months: string[] = [];
+    const now = new Date();
+
+    for (let i = 5; i >= 1; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      months.push(`${year}-${month}`);
+    }
+
+    for (let i = 0; i <= 6; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
       const year = d.getFullYear();
       const month = String(d.getMonth() + 1).padStart(2, '0');
       months.push(`${year}-${month}`);

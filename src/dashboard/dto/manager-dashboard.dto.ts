@@ -13,6 +13,11 @@ export interface ManagerDashboardSummaryDto {
   notYetDueInstallmentsCount: number;
   notYetDueInstallmentsAmount: number;
   receivablesBacklogAmount: number;
+
+  currentMonthInstallmentsCount: number;
+  currentMonthInstallmentsAmount: number;
+  nextMonthInstallmentsCount: number;
+  nextMonthInstallmentsAmount: number;
 }
 
 export interface DashboardMonthlySeriesDto {
