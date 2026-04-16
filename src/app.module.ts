@@ -39,6 +39,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { DirectoModule } from './directo/directo.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { CuotaRedModule } from './cuotared/cuotared.module';
+import { JudicialExecutionsModule } from './judicial-executions/judicial-executions.module';
 
 // 📦 Entidades
 import { User } from './users/user.entity';
@@ -129,6 +130,7 @@ import { RolePermission } from './permissions/role-permission.entity';
     DirectoModule,
     DashboardModule,
     CuotaRedModule,
+    JudicialExecutionsModule,
   ],
   controllers: [AppController, HealthController],
   providers: [

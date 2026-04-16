@@ -12,6 +12,7 @@
 import { Sale } from '../sales/sale.entity';
 import { InstallmentPayment } from '../installment-payments/installment-payment.entity';
 import { Client } from '../clients/entities/client.entity';
+import { JudicialExecution } from '../judicial-executions/judicial-execution.entity';
 
 export enum InstallmentStatus {
   PENDING = 'PENDING',
@@ -144,6 +145,26 @@ export class Installment {
    */
   @Column({ type: 'timestamp', nullable: true })
   paymentDate: Date | null;
+
+  @Column({ type: 'boolean', default: false })
+  isJudicialized: boolean;
+
+  @Column({ type: 'int', nullable: true })
+  judicialExecutionId: number | null;
+
+  @ManyToOne(() => JudicialExecution, (judicial) => judicial.installments, {
+    eager: false,
+    nullable: true,
+    onDelete: 'SET NULL',
+  })
+  @JoinColumn({ name: 'judicialExecutionId' })
+  judicialExecution: JudicialExecution | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  judicializedAt: Date | null;
+
+  @Column('decimal', { precision: 15, scale: 2, nullable: true })
+  judicialNetAmount: number | null;
 
   @OneToMany(() => InstallmentPayment, (payment) => payment.installment)
   payments: InstallmentPayment[];

@@ -35,6 +35,40 @@ export class InstallmentsService {
    * sobre el saldo pendiente (remainingAmount) si está vencida.
    * asOf indica la fecha de referencia para el cálculo (normalmente HOY).
    */
+  private parseLocalDate(value: string | Date): Date {
+    if (value instanceof Date) {
+      return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+    }
+
+    const str = String(value);
+
+    // YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+      const [year, month, day] = str.split('-').map(Number);
+      return new Date(year, month - 1, day);
+    }
+
+    const parsed = new Date(str);
+    return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  }
+
+  private getArgentinaToday(date: Date = new Date()): Date {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Argentina/Buenos_Aires',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+
+    const parts = formatter.formatToParts(date);
+
+    const year = Number(parts.find((p) => p.type === 'year')?.value);
+    const month = Number(parts.find((p) => p.type === 'month')?.value);
+    const day = Number(parts.find((p) => p.type === 'day')?.value);
+
+    return new Date(year, month - 1, day);
+  }  
+
   private getCurrentAmount(inst: Installment, asOf: Date = new Date()): number {
     const baseRaw =
       inst.remainingAmount != null ? inst.remainingAmount : inst.amount;
@@ -43,8 +77,8 @@ export class InstallmentsService {
     if (!inst.dueDate) return +base.toFixed(2);
     if (inst.paid) return +base.toFixed(2);
 
-    const today = new Date(asOf);
-    const due = new Date(inst.dueDate);
+const today = this.getArgentinaToday(asOf);
+const due = this.parseLocalDate(inst.dueDate);
 
     today.setHours(0, 0, 0, 0);
     due.setHours(0, 0, 0, 0);
@@ -61,7 +95,6 @@ export class InstallmentsService {
     const amountWithInterest = base * (1 + 0.01 * daysLate);
     return +amountWithInterest.toFixed(2);
   }
-
   // 📋 Listar todas las cuotas
   async findAll() {
     const installments = await this.installmentsRepository.find({
@@ -109,18 +142,18 @@ export class InstallmentsService {
       });
     }
 
-    const today = new Date();
+        const today = this.getArgentinaToday();
 
     return installments.map((inst: any) => {
       const currentAmount = this.getCurrentAmount(inst, today);
 
       let isOverdue = false;
       if (inst.dueDate && !inst.paid) {
-        const dToday = new Date(today);
-        const due = new Date(inst.dueDate);
-        dToday.setHours(0, 0, 0, 0);
-        due.setHours(0, 0, 0, 0);
-        isOverdue = dToday > due;
+const dToday = this.getArgentinaToday(today);
+const due = this.parseLocalDate(inst.dueDate);
+dToday.setHours(0, 0, 0, 0);
+due.setHours(0, 0, 0, 0);
+isOverdue = dToday > due;
       }
 
       const client = inst.client ?? inst.sale?.client ?? null;
@@ -240,9 +273,11 @@ export class InstallmentsService {
     }
 
     // ✅ Usamos la fecha efectiva del pago para calcular la mora
-    const effectiveDate = paymentDate ? new Date(paymentDate) : new Date();
+const effectiveDate = paymentDate
+  ? this.parseLocalDate(paymentDate)
+  : this.getArgentinaToday();
 
-    const due = inst.dueDate ? new Date(inst.dueDate) : null;
+const due = inst.dueDate ? this.parseLocalDate(inst.dueDate) : null;
     let daysLate = 0;
 
     if (due) {

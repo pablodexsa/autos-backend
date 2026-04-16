@@ -267,7 +267,8 @@ export class DashboardService {
             ELSE 0
           END
         ), 0)::numeric AS "receivablesBacklogAmount"
-      FROM installments
+FROM installments
+WHERE COALESCE("isJudicialized", false) = false
     `);
 
     const [currentMonthInstallmentsRow, nextMonthInstallmentsRow] =
@@ -317,6 +318,17 @@ export class DashboardService {
     }
 
     const installments = monthInstallmentsRows?.[0] ?? {};
+
+const judicialRows = await this.dataSource.query(`
+  SELECT
+    COUNT(*)::int AS "judicialInstallmentsCount",
+    COUNT(DISTINCT "clientId")::int AS "judicialClientsCount",
+    COALESCE(SUM("judicialNetAmount"), 0)::numeric AS "judicialAmount"
+  FROM installments
+  WHERE COALESCE("isJudicialized", false) = true
+    AND COALESCE("remainingAmount", 0) > 0
+`);
+
     const monthlyCollectedInstallmentsAmount = Number(
       installments.monthlyCollectedInstallmentsAmount ?? 0,
     );
@@ -366,6 +378,16 @@ export class DashboardService {
       nextMonthInstallmentsAmount: Number(
         nextMonthInstallmentsRow?.amount ?? 0,
       ),
+
+      judicialInstallmentsCount: Number(
+        judicialRows?.[0]?.judicialInstallmentsCount ?? 0,
+      ),
+      judicialClientsCount: Number(
+        judicialRows?.[0]?.judicialClientsCount ?? 0,
+      ),
+      judicialAmount: Number(
+        judicialRows?.[0]?.judicialAmount ?? 0,
+      ),
     };
   }
 
@@ -399,17 +421,18 @@ export class DashboardService {
   }
 
   private async getMonthlyCollections(): Promise<DashboardMonthlySeriesDto[]> {
-    const rows = await this.dataSource.query(`
-      SELECT
-        TO_CHAR(DATE_TRUNC('month', "paymentDate"), 'YYYY-MM') AS month,
-        COUNT(*)::int AS count,
-        COALESCE(SUM(("amount" - COALESCE("remainingAmount", 0))), 0)::numeric AS amount
-      FROM installments
-      WHERE "paymentDate" IS NOT NULL
-        AND "paymentDate" >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
-      GROUP BY DATE_TRUNC('month', "paymentDate")
-      ORDER BY DATE_TRUNC('month', "paymentDate")
-    `);
+const rows = await this.dataSource.query(`
+  SELECT
+    TO_CHAR(DATE_TRUNC('month', "paymentDate"), 'YYYY-MM') AS month,
+    COUNT(*)::int AS count,
+    COALESCE(SUM(("amount" - COALESCE("remainingAmount", 0))), 0)::numeric AS amount
+  FROM installments
+  WHERE "paymentDate" IS NOT NULL
+    AND COALESCE("isJudicialized", false) = false
+    AND "paymentDate" >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
+  GROUP BY DATE_TRUNC('month', "paymentDate")
+  ORDER BY DATE_TRUNC('month', "paymentDate")
+`);
 
     return this.mergeSeriesWithLast12Months(
       rows.map((row: any) => ({
@@ -483,34 +506,35 @@ export class DashboardService {
   private async getInstallmentsByDueMonth(): Promise<
     DashboardInstallmentsByDueMonthDto[]
   > {
-    const rows = await this.dataSource.query(`
-      SELECT
-        TO_CHAR(DATE_TRUNC('month', "dueDate"), 'YYYY-MM') AS month,
-        COALESCE(SUM("amount"), 0)::numeric AS "dueAmount",
-        COALESCE(SUM(
-          CASE
-            WHEN COALESCE("remainingAmount", 0) = 0 THEN "amount"
-            ELSE 0
-          END
-        ), 0)::numeric AS "paidAmount",
-        COALESCE(SUM(
-          CASE
-            WHEN COALESCE("remainingAmount", 0) > 0 THEN COALESCE("remainingAmount", 0)
-            ELSE 0
-          END
-        ), 0)::numeric AS "pendingAmount",
-        COUNT(*) FILTER (
-          WHERE COALESCE("remainingAmount", 0) = 0
-        )::int AS "paidCount",
-        COUNT(*) FILTER (
-          WHERE COALESCE("remainingAmount", 0) > 0
-        )::int AS "unpaidCount"
-      FROM installments
-      WHERE "dueDate" >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '5 months'
-        AND "dueDate" < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '7 months'
-      GROUP BY DATE_TRUNC('month', "dueDate")
-      ORDER BY DATE_TRUNC('month', "dueDate")
-    `);
+const rows = await this.dataSource.query(`
+  SELECT
+    TO_CHAR(DATE_TRUNC('month', "dueDate"), 'YYYY-MM') AS month,
+    COALESCE(SUM("amount"), 0)::numeric AS "dueAmount",
+    COALESCE(SUM(
+      CASE
+        WHEN COALESCE("remainingAmount", 0) = 0 THEN "amount"
+        ELSE 0
+      END
+    ), 0)::numeric AS "paidAmount",
+    COALESCE(SUM(
+      CASE
+        WHEN COALESCE("remainingAmount", 0) > 0 THEN COALESCE("remainingAmount", 0)
+        ELSE 0
+      END
+    ), 0)::numeric AS "pendingAmount",
+    COUNT(*) FILTER (
+      WHERE COALESCE("remainingAmount", 0) = 0
+    )::int AS "paidCount",
+    COUNT(*) FILTER (
+      WHERE COALESCE("remainingAmount", 0) > 0
+    )::int AS "unpaidCount"
+  FROM installments
+  WHERE COALESCE("isJudicialized", false) = false
+    AND "dueDate" >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '5 months'
+    AND "dueDate" < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '7 months'
+  GROUP BY DATE_TRUNC('month', "dueDate")
+  ORDER BY DATE_TRUNC('month', "dueDate")
+`);
 
     const mapped = rows.map((row: any) => ({
       month: row.month,
@@ -525,21 +549,22 @@ export class DashboardService {
   }
 
   private async getReceivablesAging(): Promise<DashboardAgingDto[]> {
-    const rows = await this.dataSource.query(`
-      SELECT
-        CASE
-          WHEN (CURRENT_DATE - "dueDate") <= 30 THEN '0-30'
-          WHEN (CURRENT_DATE - "dueDate") <= 60 THEN '31-60'
-          WHEN (CURRENT_DATE - "dueDate") <= 90 THEN '61-90'
-          ELSE '90+'
-        END AS bucket,
-        COUNT(*)::int AS count,
-        COALESCE(SUM(COALESCE("remainingAmount", 0)), 0)::numeric AS amount
-      FROM installments
-      WHERE COALESCE("remainingAmount", 0) > 0
-        AND "dueDate" < CURRENT_DATE
-      GROUP BY 1
-    `);
+const rows = await this.dataSource.query(`
+  SELECT
+    CASE
+      WHEN (CURRENT_DATE - "dueDate") <= 30 THEN '0-30'
+      WHEN (CURRENT_DATE - "dueDate") <= 60 THEN '31-60'
+      WHEN (CURRENT_DATE - "dueDate") <= 90 THEN '61-90'
+      ELSE '90+'
+    END AS bucket,
+    COUNT(*)::int AS count,
+    COALESCE(SUM(COALESCE("remainingAmount", 0)), 0)::numeric AS amount
+  FROM installments
+  WHERE COALESCE("remainingAmount", 0) > 0
+    AND "dueDate" < CURRENT_DATE
+    AND COALESCE("isJudicialized", false) = false
+  GROUP BY 1
+`);
 
     const baseOrder = ['0-30', '31-60', '61-90', '90+'];
 
@@ -562,22 +587,23 @@ export class DashboardService {
   }
 
   private async getTopOverdueInstallments(): Promise<DashboardInstallmentItemDto[]> {
-    const rows = await this.dataSource.query(`
-      SELECT
-        id,
-        "installmentNumber",
-        "dueDate",
-        "amount",
-        COALESCE("remainingAmount", 0) AS "remainingAmount",
-        status,
-        receiver,
-        (CURRENT_DATE - "dueDate")::int AS "daysOverdue"
-      FROM installments
-      WHERE COALESCE("remainingAmount", 0) > 0
-        AND "dueDate" < CURRENT_DATE
-      ORDER BY COALESCE("remainingAmount", 0) DESC, "dueDate" ASC
-      LIMIT 10
-    `);
+const rows = await this.dataSource.query(`
+  SELECT
+    id,
+    "installmentNumber",
+    "dueDate",
+    "amount",
+    COALESCE("remainingAmount", 0) AS "remainingAmount",
+    status,
+    receiver,
+    (CURRENT_DATE - "dueDate")::int AS "daysOverdue"
+  FROM installments
+  WHERE COALESCE("remainingAmount", 0) > 0
+    AND "dueDate" < CURRENT_DATE
+    AND COALESCE("isJudicialized", false) = false
+  ORDER BY COALESCE("remainingAmount", 0) DESC, "dueDate" ASC
+  LIMIT 10
+`);
 
     return rows.map((row: any) => ({
       id: Number(row.id),
@@ -593,21 +619,22 @@ export class DashboardService {
   }
 
   private async getUpcomingInstallments(): Promise<DashboardInstallmentItemDto[]> {
-    const rows = await this.dataSource.query(`
-      SELECT
-        id,
-        "installmentNumber",
-        "dueDate",
-        "amount",
-        COALESCE("remainingAmount", 0) AS "remainingAmount",
-        status,
-        receiver
-      FROM installments
-      WHERE COALESCE("remainingAmount", 0) > 0
-        AND "dueDate" >= CURRENT_DATE
-      ORDER BY "dueDate" ASC
-      LIMIT 10
-    `);
+const rows = await this.dataSource.query(`
+  SELECT
+    id,
+    "installmentNumber",
+    "dueDate",
+    "amount",
+    COALESCE("remainingAmount", 0) AS "remainingAmount",
+    status,
+    receiver
+  FROM installments
+  WHERE COALESCE("remainingAmount", 0) > 0
+    AND "dueDate" >= CURRENT_DATE
+    AND COALESCE("isJudicialized", false) = false
+  ORDER BY "dueDate" ASC
+  LIMIT 10
+`);
 
     return rows.map((row: any) => ({
       id: Number(row.id),
@@ -625,17 +652,18 @@ export class DashboardService {
     count: number;
     amount: number;
   }> {
-    const rows = await this.dataSource.query(
-      `
-      SELECT
-        COUNT(*)::int AS count,
-        COALESCE(SUM("amount"), 0)::numeric AS amount
-      FROM installments
-      WHERE "dueDate" >= (DATE_TRUNC('month', CURRENT_DATE) + ($1 * INTERVAL '1 month'))
-        AND "dueDate" < (DATE_TRUNC('month', CURRENT_DATE) + (($1 + 1) * INTERVAL '1 month'))
-      `,
-      [monthOffset],
-    );
+const rows = await this.dataSource.query(
+  `
+  SELECT
+    COUNT(*)::int AS count,
+    COALESCE(SUM("amount"), 0)::numeric AS amount
+  FROM installments
+  WHERE COALESCE("isJudicialized", false) = false
+    AND "dueDate" >= (DATE_TRUNC('month', CURRENT_DATE) + ($1 * INTERVAL '1 month'))
+    AND "dueDate" < (DATE_TRUNC('month', CURRENT_DATE) + (($1 + 1) * INTERVAL '1 month'))
+  `,
+  [monthOffset],
+);
 
     return {
       count: Number(rows?.[0]?.count ?? 0),

@@ -18,6 +18,10 @@ export interface ManagerDashboardSummaryDto {
   currentMonthInstallmentsAmount: number;
   nextMonthInstallmentsCount: number;
   nextMonthInstallmentsAmount: number;
+
+  judicialInstallmentsCount: number;
+  judicialClientsCount: number;
+  judicialAmount: number;
 }
 
 export interface DashboardMonthlySeriesDto {
