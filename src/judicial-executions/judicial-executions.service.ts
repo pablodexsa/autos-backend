@@ -5,7 +5,10 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
-import { JudicialExecution, JudicialExecutionStatus } from './judicial-execution.entity';
+import {
+  JudicialExecution,
+  JudicialExecutionStatus,
+} from './judicial-execution.entity';
 import { CreateJudicialExecutionDto } from './dto/create-judicial-execution.dto';
 import { Client } from '../clients/entities/client.entity';
 import { Installment } from '../installments/installment.entity';
@@ -40,7 +43,69 @@ export class JudicialExecutionsService {
     return remaining;
   }
 
-  async preview(clientId: number): Promise<JudicialExecutionPreviewDto> {
+  private getClientDisplayName(client: any): string {
+    return (
+      client?.fullName ||
+      client?.name ||
+      `${client?.firstName ?? ''} ${client?.lastName ?? ''}`.trim()
+    );
+  }
+
+  private normalizeSaleIds(saleIds: number[]): number[] {
+    return [
+      ...new Set(
+        (saleIds || [])
+          .map(Number)
+          .filter((v) => Number.isInteger(v) && v > 0),
+      ),
+    ];
+  }
+
+  private async getEligibleInstallmentsBySales(
+    installmentRepo: Repository<Installment>,
+    clientId: number,
+    saleIds: number[],
+  ) {
+    const normalizedSaleIds = this.normalizeSaleIds(saleIds);
+
+    if (!normalizedSaleIds.length) {
+      throw new BadRequestException(
+        'Debe seleccionar al menos un vehículo/operación.',
+      );
+    }
+
+    const installments = await installmentRepo
+      .createQueryBuilder('i')
+      .innerJoinAndSelect('i.sale', 'sale')
+      .innerJoinAndSelect('sale.vehicle', 'vehicle')
+      .where('i.clientId = :clientId', { clientId })
+      .andWhere('i.saleId IN (:...saleIds)', { saleIds: normalizedSaleIds })
+      .andWhere('COALESCE(i.remainingAmount, 0) > 0')
+      .andWhere('COALESCE(i.isJudicialized, false) = false')
+      .orderBy('vehicle.plate', 'ASC')
+      .addOrderBy('i.dueDate', 'ASC')
+      .getMany();
+
+    if (!installments.length) {
+      throw new BadRequestException(
+        'No se encontraron cuotas impagas para los vehículos seleccionados.',
+      );
+    }
+
+    const foundSaleIds = [
+      ...new Set(installments.map((i) => Number(i.saleId))),
+    ];
+
+    if (foundSaleIds.length !== normalizedSaleIds.length) {
+      throw new BadRequestException(
+        'Una o más operaciones seleccionadas no pertenecen al cliente o no tienen deuda judicializable.',
+      );
+    }
+
+    return installments;
+  }
+
+  async findClientSales(clientId: number) {
     const client = await this.clientRepo.findOne({
       where: { id: clientId },
     });
@@ -49,45 +114,92 @@ export class JudicialExecutionsService {
       throw new NotFoundException('Cliente no encontrado.');
     }
 
-    const activeExisting = await this.judicialRepo.findOne({
-      where: {
-        clientId,
-        status: JudicialExecutionStatus.ACTIVE,
-      },
-    });
-
-    if (activeExisting) {
-      throw new BadRequestException(
-        'El cliente ya posee una ejecución judicial activa.',
-      );
-    }
-
-    const qb = this.installmentRepo
+    const raw = await this.installmentRepo
       .createQueryBuilder('i')
+      .innerJoin('i.sale', 'sale')
+      .innerJoin('sale.vehicle', 'vehicle')
       .where('i.clientId = :clientId', { clientId })
       .andWhere('COALESCE(i.remainingAmount, 0) > 0')
       .andWhere('COALESCE(i.isJudicialized, false) = false')
-      .orderBy('i.dueDate', 'ASC');
+      .select('sale.id', 'saleId')
+      .addSelect('sale.createdAt', 'saleCreatedAt')
+      .addSelect('vehicle.id', 'vehicleId')
+      .addSelect('vehicle.plate', 'plate')
+      .addSelect('vehicle.brand', 'brand')
+      .addSelect('vehicle.model', 'model')
+      .addSelect('vehicle.versionName', 'versionName')
+      .addSelect('COUNT(i.id)', 'installmentsCount')
+      .addSelect('SUM(COALESCE(i.remainingAmount, 0))', 'pendingAmount')
+      .groupBy('sale.id')
+      .addGroupBy('sale.createdAt')
+      .addGroupBy('vehicle.id')
+      .addGroupBy('vehicle.plate')
+      .addGroupBy('vehicle.brand')
+      .addGroupBy('vehicle.model')
+      .addGroupBy('vehicle.versionName')
+      .orderBy('sale.createdAt', 'DESC')
+      .getRawMany();
 
-    const installments = await qb.getMany();
-
-    if (!installments.length) {
+    if (!raw.length) {
       throw new BadRequestException(
-        'El cliente no tiene cuotas impagas para judicializar.',
+        'El cliente no tiene vehículos con deuda judicializable.',
       );
     }
 
+    return {
+      clientId,
+      clientName: this.getClientDisplayName(client),
+      sales: raw.map((row) => ({
+        saleId: Number(row.saleId),
+        vehicleId: Number(row.vehicleId),
+        plate: row.plate ?? null,
+        vehicleLabel: [row.brand, row.model, row.versionName]
+          .filter(Boolean)
+          .join(' '),
+        saleCreatedAt: row.saleCreatedAt
+          ? new Date(row.saleCreatedAt).toISOString()
+          : null,
+        installmentsCount: Number(row.installmentsCount ?? 0),
+        pendingAmount: Number(Number(row.pendingAmount ?? 0).toFixed(2)),
+      })),
+    };
+  }
+
+  async preview(
+    clientId: number,
+    saleIds: number[],
+  ): Promise<JudicialExecutionPreviewDto> {
+    const client = await this.clientRepo.findOne({
+      where: { id: clientId },
+    });
+
+    if (!client) {
+      throw new NotFoundException('Cliente no encontrado.');
+    }
+
+    const installments = await this.getEligibleInstallmentsBySales(
+      this.installmentRepo,
+      clientId,
+      saleIds,
+    );
+
     const mappedInstallments = installments.map((installment) => {
       const judicialNetAmount = this.getPurePendingAmount(installment);
+      const vehicle = (installment.sale as any)?.vehicle;
 
       return {
         id: installment.id,
-        saleId: (installment as any).saleId ?? null,
-        dueDate: (installment as any).dueDate
-          ? new Date((installment as any).dueDate).toISOString()
+        saleId: installment.saleId ?? null,
+        plate: vehicle?.plate ?? null,
+        vehicleLabel: [vehicle?.brand, vehicle?.model, vehicle?.versionName]
+          .filter(Boolean)
+          .join(' '),
+        installmentNumber: installment.installmentNumber ?? null,
+        dueDate: installment.dueDate
+          ? new Date(installment.dueDate).toISOString()
           : null,
-        amount: this.toNumber((installment as any).amount),
-        remainingAmount: this.toNumber((installment as any).remainingAmount),
+        amount: this.toNumber(installment.amount),
+        remainingAmount: this.toNumber(installment.remainingAmount),
         judicialNetAmount,
       };
     });
@@ -99,14 +211,12 @@ export class JudicialExecutionsService {
 
     return {
       clientId,
-      clientName:
-        (client as any).fullName ||
-        (client as any).name ||
-        `${(client as any).firstName ?? ''} ${(client as any).lastName ?? ''}`.trim(),
+      clientName: this.getClientDisplayName(client),
+      selectedSaleIds: this.normalizeSaleIds(saleIds),
       installmentsCount: mappedInstallments.length,
-      executedNetAmount,
+      executedNetAmount: Number(executedNetAmount.toFixed(2)),
       installments: mappedInstallments,
-    };
+    } as any;
   }
 
   async create(dto: CreateJudicialExecutionDto, userId?: number) {
@@ -123,32 +233,11 @@ export class JudicialExecutionsService {
         throw new NotFoundException('Cliente no encontrado.');
       }
 
-      const activeExisting = await judicialRepo.findOne({
-        where: {
-          clientId: dto.clientId,
-          status: JudicialExecutionStatus.ACTIVE,
-        },
-      });
-
-      if (activeExisting) {
-        throw new BadRequestException(
-          'El cliente ya posee una ejecución judicial activa.',
-        );
-      }
-
-      const installments = await installmentRepo
-        .createQueryBuilder('i')
-        .where('i.clientId = :clientId', { clientId: dto.clientId })
-        .andWhere('COALESCE(i.remainingAmount, 0) > 0')
-        .andWhere('COALESCE(i.isJudicialized, false) = false')
-        .orderBy('i.dueDate', 'ASC')
-        .getMany();
-
-      if (!installments.length) {
-        throw new BadRequestException(
-          'El cliente no tiene cuotas impagas para judicializar.',
-        );
-      }
+      const installments = await this.getEligibleInstallmentsBySales(
+        installmentRepo,
+        dto.clientId,
+        dto.saleIds ?? [],
+      );
 
       const judicialNetAmounts = installments.map((installment) =>
         this.getPurePendingAmount(installment),
@@ -159,16 +248,16 @@ export class JudicialExecutionsService {
         0,
       );
 
-const judicial = judicialRepo.create({
-  clientId: dto.clientId,
-  status: JudicialExecutionStatus.ACTIVE,
-  lawFirmName: dto.lawFirmName ?? null,
-  notes: dto.notes ?? null,
-  executedNetAmount: Number(executedNetAmount.toFixed(2)),
-  affectedInstallmentsCount: installments.length,
-  startedAt: new Date(),
-  createdById: userId ?? null,
-});
+      const judicial = judicialRepo.create({
+        clientId: dto.clientId,
+        status: JudicialExecutionStatus.ACTIVE,
+        lawFirmName: dto.lawFirmName ?? null,
+        notes: dto.notes ?? null,
+        executedNetAmount: Number(executedNetAmount.toFixed(2)),
+        affectedInstallmentsCount: installments.length,
+        startedAt: new Date(),
+        createdById: userId ?? null,
+      });
 
       const savedJudicial: JudicialExecution = await judicialRepo.save(judicial);
 
@@ -178,7 +267,9 @@ const judicial = judicialRepo.create({
         installment.isJudicialized = true;
         installment.judicialExecutionId = savedJudicial.id;
         installment.judicializedAt = judicializedAt;
-        installment.judicialNetAmount = Number(judicialNetAmounts[index].toFixed(2));
+        installment.judicialNetAmount = Number(
+          judicialNetAmounts[index].toFixed(2),
+        );
       });
 
       await installmentRepo.save(installments);
@@ -222,7 +313,11 @@ const judicial = judicialRepo.create({
       where: { id },
       relations: {
         client: true,
-        installments: true,
+        installments: {
+          sale: {
+            vehicle: true,
+          },
+        },
       } as any,
     });
 
@@ -233,21 +328,20 @@ const judicial = judicialRepo.create({
     return judicial;
   }
 
-async close(id: number) {
-  const judicial = await this.judicialRepo.findOne({
-    where: { id },
-  });
+  async close(id: number) {
+    const judicial = await this.judicialRepo.findOne({
+      where: { id },
+    });
 
-  if (!judicial) {
-    throw new NotFoundException('Ejecución judicial no encontrada.');
+    if (!judicial) {
+      throw new NotFoundException('Ejecución judicial no encontrada.');
+    }
+
+    if (judicial.status === JudicialExecutionStatus.CLOSED) {
+      throw new BadRequestException('La ejecución judicial ya está cerrada.');
+    }
+
+    judicial.status = JudicialExecutionStatus.CLOSED;
+    return this.judicialRepo.save(judicial);
   }
-
-  if (judicial.status === JudicialExecutionStatus.CLOSED) {
-    throw new BadRequestException('La ejecución judicial ya está cerrada.');
-  }
-
-  judicial.status = JudicialExecutionStatus.CLOSED;
-  return this.judicialRepo.save(judicial);
-}
-
 }

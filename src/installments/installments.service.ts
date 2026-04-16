@@ -98,9 +98,10 @@ const due = this.parseLocalDate(inst.dueDate);
   // 📋 Listar todas las cuotas
   async findAll() {
     const installments = await this.installmentsRepository.find({
-      where: {
-        concept: In(['PERSONAL_FINANCING', 'MOTO_PLAN']),
-      },
+where: {
+  concept: In(['PERSONAL_FINANCING', 'MOTO_PLAN']),
+  isJudicialized: false,
+},
       relations: [
         'sale',
         'sale.client',
@@ -188,6 +189,7 @@ isOverdue = dToday > due;
         paid: inst.paid === true,
         status: inst.status,
         isOverdue,
+        isJudicialized: inst.isJudicialized === true,
 
         dueDate: inst.dueDate,
         saleId: inst.sale?.id ?? null,
@@ -255,6 +257,12 @@ isOverdue = dToday > due;
     if (!inst) {
       throw new NotFoundException(`Installment ${id} not found`);
     }
+
+if (inst.isJudicialized) {
+  throw new BadRequestException(
+    'La cuota está judicializada y no puede recibir pagos por esta vía.',
+  );
+}
 
     const payAmount = Number(amount);
     if (!payAmount || payAmount <= 0) {
