@@ -122,6 +122,24 @@ export class CloudinaryService {
   }
 
   // ============================
+  // CLIENTES PRÉSTAMOS
+  // ============================
+  uploadLoanClientDoc(opts: {
+    buffer: Buffer;
+    originalName: string;
+    loanClientId: number;
+    docType: 'dni' | 'business' | 'service_bill' | 'bank_account';
+  }) {
+    return this.uploadRaw({
+      buffer: opts.buffer,
+      originalName: opts.originalName,
+      folder: `degrazia/loan-clients/${opts.docType}`,
+      filenameBase: `loan_client_${opts.loanClientId}_${opts.docType}`,
+    });
+  }
+
+
+  // ============================
   // VEHÍCULOS
   // ============================
   uploadVehicleDoc(opts: {

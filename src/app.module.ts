@@ -40,6 +40,10 @@ import { DirectoModule } from './directo/directo.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { CuotaRedModule } from './cuotared/cuotared.module';
 import { JudicialExecutionsModule } from './judicial-executions/judicial-executions.module';
+import { LoanClientsModule } from './loan-clients/loan-clients.module';
+import { LoansModule } from './loans/loans.module';
+import { LoanInstallmentsModule } from './loan-installments/loan-installments.module';
+import { LoanInstallmentPaymentsModule } from './loan-installment-payments/loan-installment-payments.module';
 
 // 📦 Entidades
 import { User } from './users/user.entity';
@@ -51,14 +55,18 @@ import { Budget } from './budgets/budget.entity';
 import { Purchase } from './purchases/purchase.entity';
 import { Installment } from './installments/installment.entity';
 import { InstallmentPayment } from './installment-payments/installment-payment.entity';
+import { LoanClient } from './loan-clients/loan-client.entity';
+import { Loan } from './loans/loan.entity';
+import { LoanInstallment } from './loan-installments/loan-installment.entity';
+import { LoanInstallmentPayment } from './loan-installment-payments/loan-installment-payment.entity';
+import { LoanFundMovement } from './loans/loan-fund-movement.entity';
 import { InstallmentSetting } from './installments/installment-setting.entity';
 import { Brand } from './brands/brand.entity';
 import { Model } from './models/model.entity';
 import { Version } from './versions/version.entity';
-
-// ✅ NUEVO: permisos
 import { Permission } from './permissions/permission.entity';
 import { RolePermission } from './permissions/role-permission.entity';
+
 
 @Module({
   imports: [
@@ -84,6 +92,11 @@ import { RolePermission } from './permissions/role-permission.entity';
         Purchase,
         Installment,
         InstallmentPayment,
+        LoanClient,
+        Loan,
+        LoanInstallment,
+        LoanInstallmentPayment,
+        LoanFundMovement,
         InstallmentSetting,
         Brand,
         Model,
@@ -131,6 +144,10 @@ import { RolePermission } from './permissions/role-permission.entity';
     DashboardModule,
     CuotaRedModule,
     JudicialExecutionsModule,
+    LoanClientsModule,
+    LoansModule,
+    LoanInstallmentsModule,
+    LoanInstallmentPaymentsModule,
   ],
   controllers: [AppController, HealthController],
   providers: [
