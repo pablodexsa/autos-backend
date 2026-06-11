@@ -44,6 +44,8 @@ import { LoanClientsModule } from './loan-clients/loan-clients.module';
 import { LoansModule } from './loans/loans.module';
 import { LoanInstallmentsModule } from './loan-installments/loan-installments.module';
 import { LoanInstallmentPaymentsModule } from './loan-installment-payments/loan-installment-payments.module';
+import { KairosLeadsModule } from './kairos-leads/kairos-leads.module';
+import { KairosWhatsappModule } from './kairos-whatsapp/kairos-whatsapp.module';
 
 // 📦 Entidades
 import { User } from './users/user.entity';
@@ -148,6 +150,8 @@ import { RolePermission } from './permissions/role-permission.entity';
     LoansModule,
     LoanInstallmentsModule,
     LoanInstallmentPaymentsModule,
+    KairosLeadsModule,
+    KairosWhatsappModule,
   ],
   controllers: [AppController, HealthController],
   providers: [
