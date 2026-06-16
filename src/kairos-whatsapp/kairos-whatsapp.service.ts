@@ -34,6 +34,51 @@ export class KairosWhatsappService {
     return String(value || '').replace(/\D/g, '');
   }
 
+  private async sendTextMessage(to: string, text: string) {
+    const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+    const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+
+    if (!accessToken || !phoneNumberId) {
+      console.warn(
+        'WhatsApp Cloud API no configurado: faltan WHATSAPP_ACCESS_TOKEN o WHATSAPP_PHONE_NUMBER_ID.',
+      );
+      return;
+    }
+
+    const response = await fetch(
+      `https://graph.facebook.com/v25.0/${phoneNumberId}/messages`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          to,
+          type: 'text',
+          text: {
+            preview_url: false,
+            body: text,
+          },
+        }),
+      },
+    );
+
+    const responseText = await response.text();
+
+    if (!response.ok) {
+      console.error(
+        'Error enviando WhatsApp:',
+        response.status,
+        responseText,
+      );
+      return;
+    }
+
+    console.log('WhatsApp enviado:', responseText);
+  }
+
   private buildSummary(data: any): string {
     return [
       'Perfecto. Estos son los datos que registré:',
@@ -44,7 +89,9 @@ export class KairosWhatsappService {
       `Dirección del comercio: ${data.businessAddress || '-'}`,
       `Rubro: ${data.businessType || '-'}`,
       `Antigüedad: ${data.businessAge || '-'}`,
-      `Monto solicitado: $${Number(data.requestedAmount || 0).toLocaleString('es-AR')}`,
+      `Monto solicitado: $${Number(data.requestedAmount || 0).toLocaleString(
+        'es-AR',
+      )}`,
       '',
       '¿Son correctos?',
       'Respondé 1 para confirmar o 2 para volver a empezar.',
@@ -318,12 +365,22 @@ export class KairosWhatsappService {
 
           if (!from || !text) continue;
 
-          await this.receiveMessage({
+          console.log('WhatsApp mensaje recibido:', {
+            from,
+            text,
+            type: message?.type,
+          });
+
+          const result = await this.receiveMessage({
             from,
             text,
             campaign: 'WhatsApp Cloud API',
             adName: value?.metadata?.display_phone_number || undefined,
           });
+
+          if (result?.reply) {
+            await this.sendTextMessage(from, result.reply);
+          }
         }
       }
     }
