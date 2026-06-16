@@ -38,12 +38,23 @@ export class KairosWhatsappService {
     const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
     const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
 
+    const destination = this.normalizePhone(
+      process.env.WHATSAPP_TEST_RECIPIENT_PHONE || to,
+    );
+
     if (!accessToken || !phoneNumberId) {
       console.warn(
         'WhatsApp Cloud API no configurado: faltan WHATSAPP_ACCESS_TOKEN o WHATSAPP_PHONE_NUMBER_ID.',
       );
       return;
     }
+
+    if (!destination) {
+      console.warn('WhatsApp Cloud API: destinatario vacío.');
+      return;
+    }
+
+    console.log('Enviando WhatsApp a:', destination);
 
     const response = await fetch(
       `https://graph.facebook.com/v25.0/${phoneNumberId}/messages`,
@@ -55,7 +66,7 @@ export class KairosWhatsappService {
         },
         body: JSON.stringify({
           messaging_product: 'whatsapp',
-          to,
+          to: destination,
           type: 'text',
           text: {
             preview_url: false,
