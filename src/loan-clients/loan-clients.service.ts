@@ -44,6 +44,7 @@ export class LoanClientsService {
       firstName: data.firstName.trim(),
       lastName: data.lastName.trim(),
       cuitCuil: data.cuitCuil.trim(),
+      phone: data.phone?.trim() || null,
       workAddress: data.workAddress?.trim() || null,
       aliasOrCbu: data.aliasOrCbu?.trim() || null,
       dniPhotoPath: null,
@@ -58,6 +59,7 @@ export class LoanClientsService {
   async findAll(filters?: {
     q?: string;
     cuitCuil?: string;
+    phone?: string;
     firstName?: string;
     lastName?: string;
     aliasOrCbu?: string;
@@ -70,7 +72,7 @@ export class LoanClientsService {
     if (filters?.q?.trim()) {
       const q = `%${filters.q.trim()}%`;
       qb.andWhere(
-        `(client.firstName ILIKE :q OR client.lastName ILIKE :q OR client.cuitCuil ILIKE :q OR client.aliasOrCbu ILIKE :q)`,
+        `(client.firstName ILIKE :q OR client.lastName ILIKE :q OR client.cuitCuil ILIKE :q OR client.phone ILIKE :q OR client.aliasOrCbu ILIKE :q)`,
         { q },
       );
     }
@@ -80,6 +82,12 @@ export class LoanClientsService {
         cuitCuil: `%${filters.cuitCuil.trim()}%`,
       });
     }
+
+if (filters?.phone?.trim()) {
+  qb.andWhere('client.phone ILIKE :phone', {
+    phone: `%${filters.phone.trim()}%`,
+  });
+}
 
     if (filters?.firstName?.trim()) {
       qb.andWhere('client.firstName ILIKE :firstName', {
@@ -124,6 +132,9 @@ export class LoanClientsService {
     if (data.firstName !== undefined) client.firstName = data.firstName.trim();
     if (data.lastName !== undefined) client.lastName = data.lastName.trim();
     if (data.cuitCuil !== undefined) client.cuitCuil = data.cuitCuil.trim();
+if (data.phone !== undefined) {
+  client.phone = data.phone?.trim() || null;
+}
     if (data.workAddress !== undefined) {
       client.workAddress = data.workAddress?.trim() || null;
     }

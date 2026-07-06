@@ -24,6 +24,9 @@ export class LoanClient {
   @Column({ length: 20, unique: true })
   cuitCuil: string;
 
+@Column({ type: 'varchar', length: 30, nullable: true })
+phone: string | null;
+
   @Column({ type: 'varchar', length: 200, nullable: true })
   workAddress: string | null;
 

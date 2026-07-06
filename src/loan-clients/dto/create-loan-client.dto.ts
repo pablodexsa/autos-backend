@@ -11,6 +11,10 @@ export class CreateLoanClientDto {
   @Length(10, 20)
   cuitCuil: string;
 
+@IsOptional()
+@IsString()
+phone?: string;
+
   @IsOptional()
   @IsString()
   workAddress?: string;
