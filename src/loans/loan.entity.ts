@@ -60,7 +60,7 @@ export class Loan {
   @Column({ type: 'int' })
   weeklyInstallments: number;
 
-  @Column('decimal', { precision: 6, scale: 2, default: 60 })
+  @Column('decimal', { precision: 6, scale: 2, default: 75 })
   monthlyInterestRate: number;
 
   @Column('decimal', { precision: 6, scale: 2, default: 5 })

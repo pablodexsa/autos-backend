@@ -24,8 +24,10 @@ import { PreviewLoanDto } from './dto/preview-loan.dto';
 @Injectable()
 export class LoansService {
   private readonly INITIAL_FUND = 5000000;
-  private readonly MONTHLY_INTEREST_PERCENT = 60;
+  private readonly MONTHLY_INTEREST_PERCENT = 75;
   private readonly DAILY_LATE_INTEREST_PERCENT = 5;
+  private readonly FIXED_EXPENSES = 150000;
+  private readonly EXPENSES_THRESHOLD = 1000000;
 
   constructor(
     @InjectRepository(Loan)
@@ -88,18 +90,35 @@ export class LoansService {
       throw new BadRequestException('El monto solicitado debe ser mayor a 0.');
     }
 
-    if (!installments || installments < 1 || installments > 6) {
+    if (!installments || installments < 1 || installments > 12) {
       throw new BadRequestException(
-        'La cantidad de cuotas semanales debe estar entre 1 y 6.',
+        'La cantidad de cuotas semanales debe estar entre 1 y 12.',
       );
     }
 
-    const interestAmount = +(amount * 0.6 * (installments / 4)).toFixed(2);
-    const totalToReturn = +(amount + interestAmount).toFixed(2);
-    const installmentAmount = +(totalToReturn / installments).toFixed(2);
+const expenses =
+  amount >= this.EXPENSES_THRESHOLD
+    ? this.FIXED_EXPENSES
+    : 0;
+
+const amountForCalculation = amount + expenses;
+
+const interestAmount = Math.round(
+  amountForCalculation *
+    (this.MONTHLY_INTEREST_PERCENT / 100) *
+    (installments / 4),
+);
+
+const totalToReturn = amountForCalculation + interestAmount;
+
+const installmentAmount = Math.round(
+  totalToReturn / installments,
+);
 
     return {
       requestedAmount: amount,
+      expenses,
+      amountForCalculation,
       weeklyInstallments: installments,
       monthlyInterestRate: this.MONTHLY_INTEREST_PERCENT,
       dailyLateInterestRate: this.DAILY_LATE_INTEREST_PERCENT,
@@ -331,7 +350,7 @@ export class LoansService {
     );
 
     try {
-      const logoPath = path.join(__dirname, '../../logos/EbenezerLogoByN.png');
+      const logoPath = path.join(__dirname, '../../logos/LogobynKairos.jpg');
       if (fs.existsSync(logoPath)) {
         doc.opacity(0.07).image(logoPath, 100, 180, {
           fit: [400, 400],
@@ -343,7 +362,7 @@ export class LoansService {
       console.warn('⚠️ No se pudo cargar el logo de marca de agua');
     }
 
-    doc.fontSize(22).fillColor('#1e1e1e').text('Ebenezer Capital', {
+    doc.fontSize(22).fillColor('#1e1e1e').text('Kairos Capital', {
       align: 'center',
     });
     doc.fontSize(12).fillColor('#555').text('Comprobante de Préstamo', {
@@ -410,7 +429,7 @@ export class LoansService {
       .fontSize(8.5)
       .fillColor('#555')
       .text(
-        'El cliente se compromete a hacer el pago semanal del préstamo. El interés crediticio aplicado es del 60% mensual. En caso de retraso en el pago, se aplicará un 5% de interés diario adicional sobre el saldo pendiente.',
+        'El cliente se compromete a hacer el pago semanal del préstamo. En caso de retraso en el pago, se aplicará un 5% de interés diario adicional sobre el saldo pendiente.',
         { align: 'justify', lineGap: 2.5 },
       );
 
