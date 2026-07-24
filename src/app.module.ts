@@ -1,4 +1,4 @@
-﻿import { Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
@@ -46,6 +46,8 @@ import { LoanInstallmentsModule } from './loan-installments/loan-installments.mo
 import { LoanInstallmentPaymentsModule } from './loan-installment-payments/loan-installment-payments.module';
 import { KairosLeadsModule } from './kairos-leads/kairos-leads.module';
 import { KairosWhatsappModule } from './kairos-whatsapp/kairos-whatsapp.module';
+import { CashBoxMovementsModule } from './cash-box-movements/cash-box-movements.module';
+import { FinancialDashboardModule } from './financial-dashboard/financial-dashboard.module';
 
 // 📦 Entidades
 import { User } from './users/user.entity';
@@ -68,6 +70,7 @@ import { Model } from './models/model.entity';
 import { Version } from './versions/version.entity';
 import { Permission } from './permissions/permission.entity';
 import { RolePermission } from './permissions/role-permission.entity';
+import { CashBoxMovement } from './cash-box-movements/cash-box-movement.entity';
 
 
 @Module({
@@ -108,6 +111,7 @@ import { RolePermission } from './permissions/role-permission.entity';
         // ✅ NUEVO
         Permission,
         RolePermission,
+        CashBoxMovement,
       ],
     }),
 
@@ -137,7 +141,6 @@ import { RolePermission } from './permissions/role-permission.entity';
     AuditModule,
     SettingsModule,
     MailModule,
-    ScheduleModule.forRoot(),
     NotificationsModule,
 
     // ✅ NUEVO: expone /refunds
@@ -152,6 +155,8 @@ import { RolePermission } from './permissions/role-permission.entity';
     LoanInstallmentPaymentsModule,
     KairosLeadsModule,
     KairosWhatsappModule,
+    CashBoxMovementsModule,
+    FinancialDashboardModule,
   ],
   controllers: [AppController, HealthController],
   providers: [

@@ -52,6 +52,19 @@ export class LoanInstallmentPayment {
   @Column('decimal', { precision: 15, scale: 2 })
   amount: number;
 
+  // Desglose histórico del pago. La suma de estos campos coincide con amount.
+  @Column('decimal', { precision: 15, scale: 2, default: 0 })
+  principalAmount: number;
+
+  @Column('decimal', { precision: 15, scale: 2, default: 0 })
+  expenseAmount: number;
+
+  @Column('decimal', { precision: 15, scale: 2, default: 0 })
+  interestAmount: number;
+
+  @Column('decimal', { precision: 15, scale: 2, default: 0 })
+  lateFeeAmount: number;
+
   @Column({ type: 'date' })
   paymentDate: string;
 

@@ -1,4 +1,4 @@
-﻿import {
+import {
   Entity,
   PrimaryGeneratedColumn,
   Column,
@@ -21,6 +21,9 @@ export class Client {
 
   @Column({ length: 20, unique: true })
   dni: string;
+
+  @Column({ type: 'varchar', length: 20, nullable: true, unique: true })
+  cuitCuil: string | null;
 
   @Column({ length: 100, unique: true })
   email: string;

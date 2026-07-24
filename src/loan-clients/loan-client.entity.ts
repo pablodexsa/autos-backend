@@ -11,6 +11,7 @@ import { Loan } from '../loans/loan.entity';
 
 @Entity({ name: 'loan_clients' })
 @Index('idx_loan_clients_cuit_cuil', ['cuitCuil'], { unique: true })
+@Index('idx_loan_clients_dni', ['dni'], { unique: true })
 export class LoanClient {
   @PrimaryGeneratedColumn()
   id: number;
@@ -21,8 +22,11 @@ export class LoanClient {
   @Column({ length: 80 })
   lastName: string;
 
-  @Column({ length: 20, unique: true })
-  cuitCuil: string;
+  @Column({ type: 'varchar', length: 20, nullable: true, unique: true })
+  cuitCuil: string | null;
+
+  @Column({ type: 'varchar', length: 32, nullable: true, unique: true })
+  dni: string | null;
 
 @Column({ type: 'varchar', length: 30, nullable: true })
 phone: string | null;

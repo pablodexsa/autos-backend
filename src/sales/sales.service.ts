@@ -1,11 +1,11 @@
-﻿import {
+import {
   Injectable,
   NotFoundException,
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository, In, DataSource } from 'typeorm';
 import { Sale } from './sale.entity';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { Vehicle } from '../vehicles/vehicle.entity';
@@ -22,6 +22,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { MailService } from '../mail/mail.service';
 import { SettingsService } from '../settings/settings.service';
+import { LoansService } from '../loans/loans.service';
 
 function yyyymmToDate(yyyymm: string, day: number): Date {
   const [y, m] = yyyymm.split('-').map(Number);
@@ -53,6 +54,8 @@ export class SalesService {
     private readonly loanRateRepo: Repository<LoanRate>,
     private readonly mailService: MailService,
     private readonly settingsService: SettingsService,
+    private readonly loansService: LoansService,
+    private readonly dataSource: DataSource,
   ) {}
 
   // 🔐 Helper: categorías permitidas según permisos del usuario (legacy + scoped)
@@ -238,6 +241,141 @@ const availableAll = await this.vehicleRepo.find({
     }
   }
 
+  private todayDateOnly(): string {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Argentina/Buenos_Aires',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+  }
+
+  private addDaysToDateOnly(value: string, days: number): string {
+    const [year, month, day] = value.split('-').map(Number);
+    const date = new Date(year, month - 1, day, 12, 0, 0);
+    date.setDate(date.getDate() + days);
+    return [
+      date.getFullYear(),
+      String(date.getMonth() + 1).padStart(2, '0'),
+      String(date.getDate()).padStart(2, '0'),
+    ].join('-');
+  }
+
+  private async createKairosFinancedSale(
+    dto: CreateSaleDto,
+    user: any,
+    sellerId?: number,
+    sellerName?: string,
+  ) {
+    const financedAmount = Number(dto.kairosFinancedAmount ?? 0);
+    const weeklyInstallments = Number(dto.kairosWeeklyInstallments ?? 0);
+    const saleDate = dto.saleDate;
+
+    if (!saleDate) {
+      throw new BadRequestException(
+        'La financiación Kairos requiere la fecha de venta.',
+      );
+    }
+
+    const firstDueDate = this.addDaysToDateOnly(saleDate, 7);
+
+    if (!financedAmount || financedAmount <= 0) {
+      throw new BadRequestException(
+        'La financiación Kairos requiere un monto financiado mayor a cero.',
+      );
+    }
+
+    const allowedWeeklyInstallments = [
+      6, 8, 10, 12, 15, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36,
+    ];
+    if (!allowedWeeklyInstallments.includes(weeklyInstallments)) {
+      throw new BadRequestException(
+        'La cantidad de cuotas semanales Kairos no es válida.',
+      );
+    }
+
+    return this.dataSource.transaction(async (manager) => {
+      const vehicle = await manager.findOne(Vehicle, {
+        where: { id: dto.vehicleId },
+      });
+      if (!vehicle) throw new NotFoundException('Vehicle not found');
+
+      this.assertCanAccessVehicleCategory(user, (vehicle as any)?.category);
+
+      const client = await manager.findOne(Client, {
+        where: { dni: dto.clientDni },
+      });
+      if (!client) throw new NotFoundException('Client not found');
+
+      const vehiclePrice = Number(vehicle.price ?? dto.basePrice ?? 0);
+      const tradeIn = dto.hasTradeIn ? Number(dto.tradeInValue ?? 0) : 0;
+      const downPayment = Number(dto.downPayment ?? 0);
+      const prendarioAmount = Number(dto.prendarioAmount ?? 0);
+      const paymentCompositionTotal =
+        tradeIn + downPayment + prendarioAmount + financedAmount;
+
+      if (Math.abs(paymentCompositionTotal - vehiclePrice) > 1) {
+        throw new BadRequestException(
+          `Los montos no suman el valor del auto. La suma cargada es ${paymentCompositionTotal} y el vehículo vale ${vehiclePrice}.`,
+        );
+      }
+
+      const sale = manager.create(Sale, {
+        ...dto,
+        client,
+        clientDni: client.dni,
+        clientName: `${client.firstName} ${client.lastName}`.trim(),
+        paymentType: 'kairos_financing',
+        motoPlanCode: null,
+        sellerId: sellerId ?? null,
+        sellerName: sellerName ?? null,
+        tradeInPlate: dto.tradeInPlate ?? null,
+        kairosLoanId: null,
+        saleDate,
+        kairosFinancedAmount: financedAmount,
+        kairosWeeklyInstallments: weeklyInstallments,
+        kairosFirstDueDate: firstDueDate,
+        paymentComposition: {
+          hasAdvance: Number(dto.downPayment ?? 0) > 0,
+          hasPrendario: Number(dto.prendarioAmount ?? 0) > 0,
+          hasPersonal: false,
+          hasFinancing: true,
+        },
+      });
+
+      let savedSale = await manager.save(sale);
+
+      const loan = await this.loansService.createGlMotorsLoanWithManager(
+        manager,
+        {
+          saleId: savedSale.id,
+          vehicleId: vehicle.id,
+          client: {
+            firstName: client.firstName,
+            lastName: client.lastName,
+            dni: client.dni,
+            cuitCuil: client.cuitCuil ?? null,
+            phone: client.phone,
+            address: client.address,
+          },
+          financedAmount,
+          weeklyInstallments,
+          firstDueDate,
+          requestDate: saleDate,
+        },
+      );
+
+      savedSale.kairosLoanId = loan.id;
+      savedSale = await manager.save(savedSale);
+
+      vehicle.status = 'Sold';
+      vehicle.sold = true;
+      await manager.save(vehicle);
+
+      return savedSale;
+    });
+  }
+
   // 🧾 Crear nueva venta (VALIDA categoría)
   async create(
     dto: CreateSaleDto,
@@ -245,6 +383,10 @@ const availableAll = await this.vehicleRepo.find({
     sellerId?: number,
     sellerName?: string,
   ) {
+    if (dto.paymentType === 'kairos_financing') {
+      return this.createKairosFinancedSale(dto, user, sellerId, sellerName);
+    }
+
     const vehicle = await this.vehicleRepo.findOne({
       where: { id: dto.vehicleId },
     });
@@ -706,7 +848,9 @@ const availableAll = await this.vehicleRepo.find({
         if (tasaPrendario) {
           doc.text(`Tasa aplicada: ${tasaPrendario}%`);
         }
-        doc.text(`Cuotas: ${sale.prendarioInstallments ?? '-'}`);
+        if ((sale.prendarioInstallments ?? 0) > 0) {
+ 	 doc.text(`Cuotas: ${sale.prendarioInstallments}`);
+	}
         if (prendarioConInteres > 0 && nPrendario > 0) {
           const cuota = prendarioConInteres / nPrendario;
           doc.text(
@@ -820,6 +964,10 @@ const availableAll = await this.vehicleRepo.find({
   ): string {
     if (paymentType === 'plan_motos_0km') {
       return 'Plan Motos 0km';
+    }
+
+    if (paymentType === 'kairos_financing') {
+      return 'Financiación Kairos';
     }
 
     if (!comp) return '-';

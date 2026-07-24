@@ -20,6 +20,6 @@ export class CreateLoanDto {
 
   @IsInt()
   @Min(1)
-  @Max(6)
+  @Max(12)
   weeklyInstallments: number;
 }

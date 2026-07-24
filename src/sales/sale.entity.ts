@@ -1,4 +1,4 @@
-﻿import {
+import {
   Entity,
   PrimaryGeneratedColumn,
   Column,
@@ -133,6 +133,23 @@ export class Sale {
   // 🏍️ Código plan motos
   @Column({ type: 'varchar', length: 64, nullable: true })
   motoPlanCode: string | null;
+
+
+  // 💼 Préstamo Kairos generado para una venta GL Motors
+  @Column({ type: 'int', nullable: true })
+  kairosLoanId: number | null;
+
+  @Column('decimal', { precision: 15, scale: 2, nullable: true })
+  kairosFinancedAmount: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  kairosWeeklyInstallments: number | null;
+
+  @Column({ type: 'date', nullable: true })
+  saleDate: string | null;
+
+  @Column({ type: 'date', nullable: true })
+  kairosFirstDueDate: string | null;
 
   // 📆 Relación con cuotas (opcional)
   @OneToMany(() => Installment, (installment) => installment.sale, {

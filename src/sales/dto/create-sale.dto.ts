@@ -1,4 +1,4 @@
-﻿import {
+import {
   IsBoolean,
   IsInt,
   IsNotEmpty,
@@ -8,6 +8,7 @@
   Min,
   MaxLength,
   IsIn,
+  IsDateString,
 } from 'class-validator';
 
 export class CreateSaleDto {
@@ -103,10 +104,35 @@ export class CreateSaleDto {
 
   // 🏍️ Plan motos 0km
   @IsOptional()
-  @IsIn(['contado', 'anticipo_financiacion', 'plan_motos_0km'])
-  paymentType?: 'contado' | 'anticipo_financiacion' | 'plan_motos_0km';
+  @IsIn([
+    'contado',
+    'anticipo_financiacion',
+    'plan_motos_0km',
+    'kairos_financing',
+  ])
+  paymentType?:
+    | 'contado'
+    | 'anticipo_financiacion'
+    | 'plan_motos_0km'
+    | 'kairos_financing';
 
   @IsOptional()
   @IsString()
   motoPlanCode?: string;
+
+  // 💼 Financiación Kairos para ventas GL Motors
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  kairosFinancedAmount?: number;
+
+  @IsOptional()
+  @IsInt()
+  @IsIn([6, 8, 10, 12, 15, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36])
+  kairosWeeklyInstallments?: number;
+
+  @IsOptional()
+  @IsDateString()
+  saleDate?: string;
+
 }

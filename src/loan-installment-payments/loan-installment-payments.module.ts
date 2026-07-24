@@ -8,14 +8,12 @@ import { Loan } from '../loans/loan.entity';
 import { LoanClient } from '../loan-clients/loan-client.entity';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([
-      LoanInstallmentPayment,
-      LoanInstallment,
-      Loan,
-      LoanClient,
-    ]),
-  ],
+  imports: [TypeOrmModule.forFeature([
+    LoanInstallmentPayment,
+    LoanInstallment,
+    Loan,
+    LoanClient,
+  ])],
   controllers: [LoanInstallmentPaymentsController],
   providers: [LoanInstallmentPaymentsService],
   exports: [LoanInstallmentPaymentsService],

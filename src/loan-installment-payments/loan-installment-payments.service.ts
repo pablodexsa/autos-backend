@@ -64,7 +64,7 @@ export class LoanInstallmentPaymentsService {
     );
 
     try {
-      const logoPath = path.join(__dirname, '../../logos/EbenezerLogoByN.png');
+      const logoPath = path.join(__dirname, '../../logos/LogobynKairos.jpg');
       if (fs.existsSync(logoPath)) {
         doc.opacity(0.07).image(logoPath, 100, 150, {
           fit: [400, 400],
@@ -79,7 +79,7 @@ export class LoanInstallmentPaymentsService {
     doc.fontSize(20).fillColor('#1e1e1e').text('RECIBO DE PAGO', {
       align: 'center',
     });
-    doc.fontSize(12).fillColor('#555').text('Ebenezer Capital', {
+    doc.fontSize(12).fillColor('#555').text('Kairos Capital', {
       align: 'center',
     });
 
