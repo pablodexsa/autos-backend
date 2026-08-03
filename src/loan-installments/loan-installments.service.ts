@@ -368,6 +368,7 @@ export class LoanInstallmentsService {
               requestedAmount: Number(inst.loan.requestedAmount),
               totalToReturn: Number(inst.loan.totalToReturn),
               requestDate: inst.loan.requestDate,
+	      dailyLateInterestRate: Number(inst.loan.dailyLateInterestRate),
             }
           : null,
         payment: payments.length ? payments[payments.length - 1] : null,
