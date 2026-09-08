@@ -52,11 +52,11 @@ export class LoanRatesService {
   }
 
   // ============================================================
-  // ✅ NUEVO: Settings - Matriz 3x3 (type x months) para editar tasas
+  // Settings - Matriz de tipos y plazos para editar tasas
   // ============================================================
 
   private readonly SETTINGS_TYPES = ['prendario', 'personal', 'financiacion'] as const;
-  private readonly SETTINGS_MONTHS = [12, 24, 36] as const;
+  private readonly SETTINGS_MONTHS = [12, 24, 36, 48] as const;
 
   async getSettingsMatrix() {
     const rows = await this.repo.find({
@@ -67,7 +67,7 @@ export class LoanRatesService {
       order: { type: 'ASC', months: 'ASC' },
     });
 
-    // Validar que existan los 9 registros (3*3)
+    // Validar que existan todos los registros de la matriz.
     const missing: Array<{ type: string; months: number }> = [];
     for (const t of this.SETTINGS_TYPES) {
       for (const m of this.SETTINGS_MONTHS) {
@@ -86,9 +86,9 @@ export class LoanRatesService {
     }
 
     const values: Record<string, Record<number, number>> = {
-      prendario: { 12: 0, 24: 0, 36: 0 },
-      personal: { 12: 0, 24: 0, 36: 0 },
-      financiacion: { 12: 0, 24: 0, 36: 0 },
+      prendario: { 12: 0, 24: 0, 36: 0, 48: 0 },
+      personal: { 12: 0, 24: 0, 36: 0, 48: 0 },
+      financiacion: { 12: 0, 24: 0, 36: 0, 48: 0 },
     };
 
     for (const r of rows) {

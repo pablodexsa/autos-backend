@@ -6,8 +6,8 @@ class LoanRateMatrixItemDto {
   type: 'prendario' | 'personal' | 'financiacion';
 
   @IsInt()
-  @IsIn([12, 24, 36])
-  months: 12 | 24 | 36;
+  @IsIn([12, 24, 36, 48])
+  months: 12 | 24 | 36 | 48;
 
   @IsNumber()
   @Min(0)

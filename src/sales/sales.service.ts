@@ -622,6 +622,8 @@ const availableAll = await this.vehicleRepo.find({
       bracket = 24;
     } else if (months <= 36) {
       bracket = 36;
+    } else if (months <= 48) {
+      bracket = 48;
     } else {
       return 0;
     }
