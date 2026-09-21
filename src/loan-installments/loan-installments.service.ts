@@ -17,7 +17,7 @@ import {
   LoanFundMovementType,
 } from '../loans/loan-fund-movement.entity';
 import { LoansService } from '../loans/loans.service';
-import { Loan } from '../loans/loan.entity';
+import { Loan, LoanStatus } from '../loans/loan.entity';
 import { LoanProductType } from '../loans/loan-product.enum';
 import {
   CashBoxMovement,
@@ -313,6 +313,9 @@ export class LoanInstallmentsService {
 
   async findAll() {
     const installments = await this.installmentsRepo.find({
+      // Las cuotas absorbidas por un nuevo plan se conservan como historial,
+      // pero ya no constituyen deuda activa ni deben volver a devengar mora.
+      where: { isRefinanced: false },
       relations: ['loan', 'loan.client', 'client', 'payments'],
       order: { dueDate: 'ASC' },
     });
@@ -353,6 +356,9 @@ export class LoanInstallmentsService {
         dueDate: inst.dueDate,
         lastPaymentAt: inst.lastPaymentAt,
         paymentDate: inst.paymentDate,
+        isRefinanced: inst.isRefinanced,
+        refinancedAt: inst.refinancedAt,
+        refinancedToLoanId: inst.refinancedToLoanId,
         client: inst.client
           ? {
               id: inst.client.id,
@@ -368,7 +374,11 @@ export class LoanInstallmentsService {
               requestedAmount: Number(inst.loan.requestedAmount),
               totalToReturn: Number(inst.loan.totalToReturn),
               requestDate: inst.loan.requestDate,
-	      dailyLateInterestRate: Number(inst.loan.dailyLateInterestRate),
+              dailyLateInterestRate: Number(inst.loan.dailyLateInterestRate),
+              status: inst.loan.status,
+              isRefinancing: inst.loan.isRefinancing,
+              refinancedFromLoanId: inst.loan.refinancedFromLoanId,
+              payerName: inst.loan.payerName,
             }
           : null,
         payment: payments.length ? payments[payments.length - 1] : null,
@@ -399,6 +409,18 @@ export class LoanInstallmentsService {
     });
     if (!inst) {
       throw new NotFoundException(`Cuota de préstamo ${id} no encontrada.`);
+    }
+
+    if (inst.isRefinanced) {
+      throw new BadRequestException(
+        'La cuota pertenece a un plan refinanciado y ya no admite pagos.',
+      );
+    }
+
+    if (inst.loan.status !== LoanStatus.ACTIVE) {
+      throw new BadRequestException(
+        'El préstamo no está activo y no admite nuevos pagos.',
+      );
     }
 
     const payAmount = this.money(Number(amount));

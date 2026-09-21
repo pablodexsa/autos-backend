@@ -24,6 +24,8 @@ export enum LoanStatus {
 @Index('idx_loans_requestDate', ['requestDate'])
 @Index('idx_loans_product_type', ['productType'])
 @Index('idx_loans_source_sale_id', ['sourceSaleId'])
+@Index('idx_loans_is_refinancing', ['isRefinancing'])
+@Index('idx_loans_refinanced_from_loan_id', ['refinancedFromLoanId'])
 export class Loan {
   @PrimaryGeneratedColumn()
   id: number;
@@ -91,6 +93,21 @@ export class Loan {
 
   @Column({ type: 'int', nullable: true })
   sourceVehicleId: number | null;
+
+  /**
+   * Indica que el préstamo representa un nuevo plan por refinanciación y no
+   * un desembolso de dinero nuevo.
+   */
+  @Column({ type: 'boolean', default: false })
+  isRefinancing: boolean;
+
+  /** Préstamo cuyo saldo fue reemplazado por este nuevo plan. */
+  @Column({ type: 'int', nullable: true })
+  refinancedFromLoanId: number | null;
+
+  /** Persona que efectivamente realizará los pagos, si difiere del titular. */
+  @Column({ type: 'varchar', length: 180, nullable: true })
+  payerName: string | null;
 
   @Column({
     type: 'enum',

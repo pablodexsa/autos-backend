@@ -27,6 +27,7 @@ export enum LoanInstallmentStatus {
 ])
 @Index('idx_loan_installments_clientId', ['clientId'])
 @Index('idx_loan_installments_loanId', ['loanId'])
+@Index('idx_loan_installments_is_refinanced', ['isRefinanced'])
 export class LoanInstallment {
   @PrimaryGeneratedColumn()
   id: number;
@@ -85,6 +86,19 @@ export class LoanInstallment {
 
   @Column({ type: 'timestamp', nullable: true })
   paymentDate: Date | null;
+
+  /**
+   * La obligación fue absorbida por un nuevo plan. Se conserva la fila para
+   * mantener trazabilidad y preservar los pagos parciales asociados.
+   */
+  @Column({ type: 'boolean', default: false })
+  isRefinanced: boolean;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  refinancedAt: Date | null;
+
+  @Column({ type: 'int', nullable: true })
+  refinancedToLoanId: number | null;
 
   @OneToMany(() => LoanInstallmentPayment, (payment) => payment.installment)
   payments: LoanInstallmentPayment[];

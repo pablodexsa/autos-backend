@@ -48,6 +48,7 @@ import { KairosLeadsModule } from './kairos-leads/kairos-leads.module';
 import { KairosWhatsappModule } from './kairos-whatsapp/kairos-whatsapp.module';
 import { CashBoxMovementsModule } from './cash-box-movements/cash-box-movements.module';
 import { FinancialDashboardModule } from './financial-dashboard/financial-dashboard.module';
+import { TreasuryModule } from './treasury/treasury.module';
 
 // 📦 Entidades
 import { User } from './users/user.entity';
@@ -71,6 +72,10 @@ import { Version } from './versions/version.entity';
 import { Permission } from './permissions/permission.entity';
 import { RolePermission } from './permissions/role-permission.entity';
 import { CashBoxMovement } from './cash-box-movements/cash-box-movement.entity';
+import { TreasuryAccount } from './treasury/treasury-account.entity';
+import { TreasuryCategory } from './treasury/treasury-category.entity';
+import { TreasuryMovement } from './treasury/treasury-movement.entity';
+import { TreasuryAllocation } from './treasury/treasury-allocation.entity';
 
 
 @Module({
@@ -112,6 +117,10 @@ import { CashBoxMovement } from './cash-box-movements/cash-box-movement.entity';
         Permission,
         RolePermission,
         CashBoxMovement,
+        TreasuryAccount,
+        TreasuryCategory,
+        TreasuryMovement,
+        TreasuryAllocation,
       ],
     }),
 
@@ -157,6 +166,7 @@ import { CashBoxMovement } from './cash-box-movements/cash-box-movement.entity';
     KairosWhatsappModule,
     CashBoxMovementsModule,
     FinancialDashboardModule,
+    TreasuryModule,
   ],
   controllers: [AppController, HealthController],
   providers: [

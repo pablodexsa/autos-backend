@@ -525,9 +525,16 @@ export class LoansService {
 
     if (!loan) return;
 
+    // Un préstamo cancelado por refinanciación debe conservar ese estado aun
+    // cuando sus cuotas activas hayan sido reemplazadas.
+    if (loan.status === LoanStatus.CANCELLED) return;
+
+    const activeInstallments =
+      loan.installments?.filter((i) => !i.isRefinanced) ?? [];
+
     const allPaid =
-      loan.installments?.length > 0 &&
-      loan.installments.every((i) => i.paid === true);
+      activeInstallments.length > 0 &&
+      activeInstallments.every((i) => i.paid === true);
 
     if (allPaid && loan.status !== LoanStatus.PAID) {
       loan.status = LoanStatus.PAID;
