@@ -5,6 +5,8 @@ import { multerConfig } from '../config/multer.config';
 import { TreasuryService } from './treasury.service';
 import { TreasuryCompany, TreasuryMovementType } from './treasury.enums';
 import { CreateTreasuryAccountDto, CreateTreasuryCategoryDto, CreateTreasuryMovementDto, CreateTreasuryTransferDto, OpeningBalanceDto, UpdateTreasuryAccountDto, UpdateTreasuryCategoryDto, VoidTreasuryMovementDto } from './dto/treasury.dto';
+import { CreateTreasuryPendingDto, PayTreasuryPendingDto, UpdateTreasuryPendingDto } from './dto/treasury-pending.dto';
+import { TreasuryPendingStatus } from './treasury-pending.entity';
 
 @UseGuards(JwtAuthGuard)
 @Controller('treasury')
@@ -26,4 +28,35 @@ export class TreasuryController {
   @Post('movements/:id/void') voidMovement(@Param('id', ParseIntPipe) id: number, @Body() dto: VoidTreasuryMovementDto, @Req() req: any) { return this.service.voidMovement(id, req.user.id, dto.reason); }
   @Get('balances') balances(@Query('company') company?: TreasuryCompany) { return this.service.balances(company); }
   @Get('dashboard') dashboard(@Query('company') company?: TreasuryCompany, @Query('from') from?: string, @Query('to') to?: string) { return this.service.dashboard(company, from, to); }
+
+  @Get('pending')
+  pending(@Query('company') company?: TreasuryCompany, @Query('status') status?: TreasuryPendingStatus) {
+    return this.service.findPending(company, status);
+  }
+
+  @Post('pending')
+  createPending(@Body() dto: CreateTreasuryPendingDto, @Req() req: any) {
+    return this.service.createPending(dto, req.user.id);
+  }
+
+  @Patch('pending/:id')
+  updatePending(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateTreasuryPendingDto) {
+    return this.service.updatePending(id, dto);
+  }
+
+  @Post('pending/:id/pay')
+  payPending(@Param('id', ParseIntPipe) id: number, @Body() dto: PayTreasuryPendingDto, @Req() req: any) {
+    return this.service.payPending(id, dto, req.user.id);
+  }
+
+  @Post('pending/:id/cancel')
+  cancelPending(@Param('id', ParseIntPipe) id: number) {
+    return this.service.cancelPending(id);
+  }
+
+  @Get('physical-stock')
+  physicalStock() {
+    return this.service.physicalStock();
+  }
+
 }

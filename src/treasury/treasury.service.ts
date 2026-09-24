@@ -7,6 +7,10 @@ import { TreasuryCategory } from './treasury-category.entity';
 import { TreasuryMovement } from './treasury-movement.entity';
 import { TreasuryCompany, TreasuryMovementStatus, TreasuryMovementType, TreasuryPaymentMethod } from './treasury.enums';
 import { CreateTreasuryAccountDto, CreateTreasuryCategoryDto, CreateTreasuryMovementDto, CreateTreasuryTransferDto, OpeningBalanceDto, UpdateTreasuryAccountDto, UpdateTreasuryCategoryDto } from './dto/treasury.dto';
+import { TreasuryPending, TreasuryPendingStatus } from './treasury-pending.entity';
+import { Vehicle } from '../vehicles/vehicle.entity';
+import { Purchase } from '../purchases/purchase.entity';
+import { CreateTreasuryPendingDto, PayTreasuryPendingDto, UpdateTreasuryPendingDto } from './dto/treasury-pending.dto';
 
 @Injectable()
 export class TreasuryService {
@@ -15,6 +19,9 @@ export class TreasuryService {
     @InjectRepository(TreasuryCategory) private categories: Repository<TreasuryCategory>,
     @InjectRepository(TreasuryMovement) private movements: Repository<TreasuryMovement>,
     @InjectRepository(TreasuryAllocation) private allocations: Repository<TreasuryAllocation>,
+    @InjectRepository(TreasuryPending) private pending: Repository<TreasuryPending>,
+    @InjectRepository(Vehicle) private vehicles: Repository<Vehicle>,
+    @InjectRepository(Purchase) private purchases: Repository<Purchase>,
     private dataSource: DataSource,
   ) {}
 
@@ -330,4 +337,151 @@ export class TreasuryService {
     const raw = await qb.groupBy('m.type').getRawMany(); let income = 0, expense = 0; for (const r of raw) r.type === TreasuryMovementType.INCOME ? income = Number(r.amount) : expense = Number(r.amount);
     return { ...balances, income, expense, netFlow: income - expense };
   }
+
+
+  async findPending(company?: TreasuryCompany, status?: TreasuryPendingStatus) {
+    const qb = this.pending.createQueryBuilder('p')
+      .orderBy(`CASE p.priority WHEN 'URGENT' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'MEDIUM' THEN 3 ELSE 4 END`, 'ASC')
+      .addOrderBy('p.dueDate', 'ASC')
+      .addOrderBy('p.id', 'DESC');
+
+    if (company) qb.andWhere('p.company = :company', { company });
+    if (status) qb.andWhere('p.status = :status', { status });
+    else qb.andWhere('p.status = :status', { status: TreasuryPendingStatus.PENDING });
+
+    return qb.getMany();
+  }
+
+  async createPending(dto: CreateTreasuryPendingDto, userId?: number) {
+    const entity = this.pending.create({
+      company: dto.company ?? TreasuryCompany.KAIROS,
+      description: dto.description.trim(),
+      counterparty: dto.counterparty?.trim() || null,
+      amount: Number(dto.amount),
+      dueDate: dto.dueDate,
+      priority: dto.priority,
+      categoryId: dto.categoryId ?? null,
+      notes: dto.notes?.trim() || null,
+      createdBy: userId ?? null,
+    });
+    return this.pending.save(entity);
+  }
+
+  async updatePending(id: number, dto: UpdateTreasuryPendingDto) {
+    const entity = await this.pending.findOne({ where: { id } });
+    if (!entity) throw new NotFoundException('Pendiente no encontrado');
+    if (entity.status === TreasuryPendingStatus.PAID) {
+      throw new BadRequestException('Un pendiente ya pagado no puede modificarse');
+    }
+    Object.assign(entity, dto);
+    if (dto.description !== undefined) entity.description = dto.description.trim();
+    if (dto.counterparty !== undefined) entity.counterparty = dto.counterparty?.trim() || null;
+    if (dto.notes !== undefined) entity.notes = dto.notes?.trim() || null;
+    if (dto.amount !== undefined) entity.amount = Number(dto.amount);
+    return this.pending.save(entity);
+  }
+
+  async cancelPending(id: number) {
+    const entity = await this.pending.findOne({ where: { id } });
+    if (!entity) throw new NotFoundException('Pendiente no encontrado');
+    if (entity.status === TreasuryPendingStatus.PAID) {
+      throw new BadRequestException('Un pendiente pagado no puede cancelarse directamente');
+    }
+    entity.status = TreasuryPendingStatus.CANCELLED;
+    return this.pending.save(entity);
+  }
+
+  async payPending(id: number, dto: PayTreasuryPendingDto, userId: number) {
+    return this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(TreasuryPending);
+      const entity = await repo.findOne({ where: { id } });
+      if (!entity) throw new NotFoundException('Pendiente no encontrado');
+      if (entity.status !== TreasuryPendingStatus.PENDING) {
+        throw new BadRequestException('El pendiente ya no se encuentra disponible para pagar');
+      }
+
+      const movementDate = dto.movementDate || new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Argentina/Buenos_Aires',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(new Date());
+
+      const movement = await this.createAutomaticMovement(manager, {
+        company: entity.company,
+        type: TreasuryMovementType.EXPENSE,
+        movementDate,
+        amount: Number(entity.amount),
+        accountId: Number(dto.accountId),
+        paymentMethod: dto.paymentMethod,
+        description: entity.description,
+        sourceType: 'TREASURY_PENDING_PAYMENT',
+        sourceId: entity.id,
+        createdBy: userId,
+        reference: dto.reference ?? null,
+        counterparty: entity.counterparty,
+      });
+
+      entity.status = TreasuryPendingStatus.PAID;
+      entity.treasuryMovementId = movement.id;
+      entity.paidAt = new Date();
+      return repo.save(entity);
+    });
+  }
+
+  async physicalStock() {
+    const vehicles = await this.vehicles.createQueryBuilder('v')
+      .where('v.isActive = true')
+      .andWhere('v.sold = false')
+      .andWhere('LOWER(v.status) = :status', { status: 'available' })
+      .andWhere('v.procedencia = :procedencia', { procedencia: 'Propios' })
+      .orderBy('v.brand', 'ASC')
+      .addOrderBy('v.model', 'ASC')
+      .getMany();
+
+    if (!vehicles.length) {
+      return { units: 0, totalSaleValue: 0, totalAcquisitionValue: 0, acquisitionValueKnownUnits: 0, vehicles: [] };
+    }
+
+    const ids = vehicles.map((v) => v.id);
+    const purchases = await this.purchases.createQueryBuilder('p')
+      .leftJoinAndSelect('p.vehicle', 'vehicle')
+      .where('vehicle.id IN (:...ids)', { ids })
+      .orderBy('p.createdAt', 'DESC')
+      .addOrderBy('p.id', 'DESC')
+      .getMany();
+
+    const latestPurchase = new Map<number, Purchase>();
+    for (const purchase of purchases) {
+      const vehicleId = purchase.vehicle?.id;
+      if (vehicleId && !latestPurchase.has(vehicleId)) latestPurchase.set(vehicleId, purchase);
+    }
+
+    const rows = vehicles.map((v) => {
+      const purchase = latestPurchase.get(v.id);
+      const acquisitionValue = purchase ? Number(purchase.amount) : null;
+      return {
+        id: v.id,
+        brand: v.brand,
+        model: v.model,
+        versionName: v.versionName,
+        year: v.year,
+        plate: v.plate,
+        procedencia: v.procedencia,
+        status: v.status,
+        salePrice: Number(v.price),
+        acquisitionValue,
+        acquisitionType: purchase?.acquisitionType ?? null,
+      };
+    });
+
+    return {
+      units: rows.length,
+      totalSaleValue: rows.reduce((sum, row) => sum + row.salePrice, 0),
+      totalAcquisitionValue: rows.reduce((sum, row) => sum + (row.acquisitionValue ?? 0), 0),
+      acquisitionValueKnownUnits: rows.filter((row) => row.acquisitionValue !== null).length,
+      vehicles: rows,
+    };
+  }
+
 }

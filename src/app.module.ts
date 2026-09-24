@@ -76,6 +76,7 @@ import { TreasuryAccount } from './treasury/treasury-account.entity';
 import { TreasuryCategory } from './treasury/treasury-category.entity';
 import { TreasuryMovement } from './treasury/treasury-movement.entity';
 import { TreasuryAllocation } from './treasury/treasury-allocation.entity';
+import { TreasuryPending } from './treasury/treasury-pending.entity';
 
 
 @Module({
@@ -121,6 +122,7 @@ import { TreasuryAllocation } from './treasury/treasury-allocation.entity';
         TreasuryCategory,
         TreasuryMovement,
         TreasuryAllocation,
+        TreasuryPending,
       ],
     }),
 
