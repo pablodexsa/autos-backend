@@ -4,7 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository, In, DataSource } from 'typeorm';
 import {
   Installment,
   InstallmentReceiver,
@@ -13,6 +13,8 @@ import {
 import { Sale } from '../sales/sale.entity';
 import { Client } from '../clients/entities/client.entity';
 import { InstallmentPayment } from '../installment-payments/installment-payment.entity';
+import { TreasuryService } from '../treasury/treasury.service';
+import { TreasuryCompany, TreasuryMovementType, TreasuryPaymentMethod } from '../treasury/treasury.enums';
 
 @Injectable()
 export class InstallmentsService {
@@ -28,6 +30,8 @@ export class InstallmentsService {
 
     @InjectRepository(InstallmentPayment)
     private readonly installmentPaymentsRepository: Repository<InstallmentPayment>,
+    private readonly dataSource: DataSource,
+    private readonly treasuryService: TreasuryService,
   ) {}
 
   private parseLocalDate(value: string | Date): Date {
@@ -248,6 +252,9 @@ saleId: inst.sale?.id ?? null,
     paymentDate: string,
     receiver: InstallmentReceiver,
     observations?: string,
+    treasuryAccountId?: number,
+    treasuryPaymentMethod?: TreasuryPaymentMethod,
+    userId?: number,
   ) {
     const inst = await this.installmentsRepository.findOne({
       where: { id },
@@ -263,6 +270,8 @@ saleId: inst.sale?.id ?? null,
         'La cuota está judicializada y no puede recibir pagos por esta vía.',
       );
     }
+
+    if (!treasuryAccountId || !treasuryPaymentMethod || !userId) throw new BadRequestException('Debe indicar cuenta y medio de cobro para Tesorería.');
 
     const payAmount = Number(amount);
     if (!payAmount || payAmount <= 0) {
@@ -342,23 +351,27 @@ saleId: inst.sale?.id ?? null,
   inst.paymentDate = null;
 }
 
-    await this.installmentsRepository.save(inst);
+    return this.dataSource.transaction(async (manager) => {
+      const savedInst = await manager.save(inst);
+      const payment = manager.create(InstallmentPayment, { installmentId: inst.id, amount: payAmount, paymentDate });
+      const savedPayment = await manager.save(payment);
+      const client = inst.client ?? inst.sale?.client ?? null;
+      const clientName = client ? `${client.firstName ?? ''} ${client.lastName ?? ''}`.trim() : null;
 
-    const payment = this.installmentPaymentsRepository.create({
-      installmentId: inst.id,
-      amount: payAmount,
-      paymentDate,
+      await this.treasuryService.createAutomaticMovement(manager, {
+        company: TreasuryCompany.GL_MOTORS, type: TreasuryMovementType.INCOME,
+        movementDate: paymentDate, amount: payAmount, accountId: treasuryAccountId,
+        paymentMethod: treasuryPaymentMethod,
+        description: `Cobro financiación GL - venta #${inst.sale?.id ?? '-'}`,
+        sourceType: 'GL_INSTALLMENT_PAYMENT', sourceId: savedPayment.id, createdBy: userId,
+        reference: `Pago cuota #${savedPayment.id}`, counterparty: clientName,
+        installmentId: inst.id, paymentId: savedPayment.id, saleId: inst.sale?.id ?? null,
+        clientId: client?.id ?? null,
+      });
+
+      return { id: savedInst.id, paid: savedInst.paid, status: savedInst.status,
+        remainingAmount: savedInst.remainingAmount, paymentId: savedPayment.id };
     });
-
-    const savedPayment = await this.installmentPaymentsRepository.save(payment);
-
-    return {
-      id: inst.id,
-      paid: inst.paid,
-      status: inst.status,
-      remainingAmount: inst.remainingAmount,
-      paymentId: savedPayment.id,
-    };
   }
 
   async markAsPaid(id: number) {

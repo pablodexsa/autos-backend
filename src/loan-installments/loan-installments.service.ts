@@ -19,6 +19,8 @@ import {
 import { LoansService } from '../loans/loans.service';
 import { Loan, LoanStatus } from '../loans/loan.entity';
 import { LoanProductType } from '../loans/loan-product.enum';
+import { TreasuryService } from '../treasury/treasury.service';
+import { TreasuryCompany, TreasuryMovementType, TreasuryPaymentMethod } from '../treasury/treasury.enums';
 import {
   CashBoxMovement,
   CashBoxMovementType,
@@ -41,6 +43,7 @@ export class LoanInstallmentsService {
     private readonly cashBoxMovementsRepo: Repository<CashBoxMovement>,
 
     private readonly dataSource: DataSource,
+    private readonly treasuryService: TreasuryService,
 
     @Inject(forwardRef(() => LoansService))
     private readonly loansService: LoansService,
@@ -402,6 +405,9 @@ export class LoanInstallmentsService {
     amount: number,
     paymentDate: string,
     observations?: string,
+    treasuryAccountId?: number,
+    treasuryPaymentMethod?: TreasuryPaymentMethod,
+    userId?: number,
   ) {
     const inst = await this.installmentsRepo.findOne({
       where: { id },
@@ -422,6 +428,8 @@ export class LoanInstallmentsService {
         'El préstamo no está activo y no admite nuevos pagos.',
       );
     }
+
+    if (!treasuryAccountId || !treasuryPaymentMethod || !userId) throw new BadRequestException('Debe indicar cuenta y medio de cobro para Tesorería.');
 
     const payAmount = this.money(Number(amount));
     if (!payAmount || payAmount <= 0) {
@@ -514,6 +522,25 @@ export class LoanInstallmentsService {
       } else {
         await this.createKairosStandardMovements(manager, inst, savedPayment);
       }
+
+      await this.treasuryService.createAutomaticMovement(manager, {
+        company: TreasuryCompany.KAIROS,
+        type: TreasuryMovementType.INCOME,
+        movementDate: this.toDateOnlyString(effectiveDate),
+        amount: payAmount,
+        accountId: treasuryAccountId,
+        paymentMethod: treasuryPaymentMethod,
+        description: inst.loan.productType === LoanProductType.GL_MOTORS
+          ? `Cobro crédito Kairos - venta GL #${inst.loan.sourceSaleId ?? '-'}`
+          : `Cobro cuota préstamo Kairos #${inst.loanId}`,
+        sourceType: 'LOAN_INSTALLMENT_PAYMENT',
+        sourceId: savedPayment.id,
+        createdBy: userId,
+        reference: `Pago #${savedPayment.id}`,
+        counterparty: inst.loan.clientName ?? null,
+        loanId: inst.loanId, installmentId: inst.id, paymentId: savedPayment.id,
+        saleId: inst.loan.sourceSaleId ?? null, clientId: inst.clientId,
+      });
 
       await this.loansService.refreshLoanStatus(inst.loanId);
 

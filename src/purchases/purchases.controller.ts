@@ -1,4 +1,4 @@
-﻿import {
+import {
   Controller,
   Get,
   Post,
@@ -7,6 +7,7 @@
   Delete,
   ParseIntPipe,
   UseGuards,
+  Req,
 } from '@nestjs/common';
 import { PurchasesService } from './purchases.service';
 import { CreatePurchaseDto } from './dto/create-purchase.dto';
@@ -31,8 +32,8 @@ export class PurchasesController {
 
   // 🧾 Crear nueva compra
   @Post()
-  create(@Body() dto: CreatePurchaseDto) {
-    return this.purchasesService.create(dto);
+  create(@Body() dto: CreatePurchaseDto, @Req() req: any) {
+    return this.purchasesService.create(dto, req.user.id);
   }
 
   // ❌ Eliminar compra

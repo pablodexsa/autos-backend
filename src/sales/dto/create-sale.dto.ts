@@ -9,7 +9,55 @@ import {
   MaxLength,
   IsIn,
   IsDateString,
+  ValidateNested,
+  IsArray,
 } from 'class-validator';
+import { Type } from 'class-transformer';
+import { TreasuryPaymentMethod } from '../../treasury/treasury.enums';
+
+export class SaleTreasuryAllocationDto {
+  @IsInt()
+  @Min(1)
+  accountId: number;
+
+  @IsNumber()
+  @Min(0.01)
+  amount: number;
+
+  @IsIn(Object.values(TreasuryPaymentMethod))
+  paymentMethod: TreasuryPaymentMethod;
+}
+
+export class TradeInVehicleDto {
+  @IsInt()
+  @Min(1)
+  versionId: number;
+
+  @IsInt()
+  @Min(1900)
+  year: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  kilometraje?: number | null;
+
+  @IsString()
+  @IsNotEmpty()
+  plate: string;
+
+  @IsString()
+  @IsNotEmpty()
+  engineNumber: string;
+
+  @IsString()
+  @IsNotEmpty()
+  chassisNumber: string;
+
+  @IsString()
+  @IsNotEmpty()
+  color: string;
+}
 
 export class CreateSaleDto {
   // 🧍 Cliente
@@ -134,5 +182,19 @@ export class CreateSaleDto {
   @IsOptional()
   @IsDateString()
   saleDate?: string;
+
+  // 💵 Dinero efectivamente cobrado al registrar la venta.
+  // Puede distribuirse entre varias cuentas GL.
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SaleTreasuryAllocationDto)
+  treasuryAllocations?: SaleTreasuryAllocationDto[];
+
+  // 🚙 Datos completos del usado que ingresa por permuta.
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => TradeInVehicleDto)
+  tradeInVehicle?: TradeInVehicleDto;
 
 }

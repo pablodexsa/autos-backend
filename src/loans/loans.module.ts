@@ -9,6 +9,7 @@ import { LoanInstallment } from '../loan-installments/loan-installment.entity';
 import { LoanClientsModule } from '../loan-clients/loan-clients.module';
 import { AuditModule } from '../audit/audit.module';
 import { CashBoxMovement } from '../cash-box-movements/cash-box-movement.entity';
+import { TreasuryModule } from '../treasury/treasury.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { CashBoxMovement } from '../cash-box-movements/cash-box-movement.entity'
       CashBoxMovement,
     ]),
     forwardRef(() => LoanClientsModule),
+    TreasuryModule,
     AuditModule,
   ],
   controllers: [LoansController],

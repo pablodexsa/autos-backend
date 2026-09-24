@@ -5,7 +5,14 @@ import { TreasuryCompany, TreasuryMovementStatus, TreasuryMovementType } from '.
 @Entity({ name: 'treasury_movements' })
 @Index('idx_treasury_movements_date', ['movementDate'])
 @Index('idx_treasury_movements_company_type', ['company', 'type'])
-@Index('idx_treasury_movements_source', ['sourceType', 'sourceId'])
+@Index(
+  'uq_treasury_movements_source',
+  ['sourceType', 'sourceId'],
+  {
+    unique: true,
+    where: '"sourceType" IS NOT NULL AND "sourceId" IS NOT NULL',
+  },
+)
 export class TreasuryMovement {
   @PrimaryGeneratedColumn() id: number;
   @Column({ type: 'enum', enum: TreasuryCompany, enumName: 'treasury_company_enum', nullable: true }) company: TreasuryCompany | null;
@@ -29,7 +36,7 @@ export class TreasuryMovement {
   @Column({ type: 'int', nullable: true }) voidedBy: number | null;
   @Column({ type: 'timestamp', nullable: true }) voidedAt: Date | null;
   @Column({ type: 'text', nullable: true }) voidReason: string | null;
-  @OneToMany(() => TreasuryAllocation, (a) => a.movement, { cascade: true, eager: true }) allocations: TreasuryAllocation[];
+  @OneToMany(() => TreasuryAllocation, (a) => a.movement, { cascade: false, eager: true }) allocations: TreasuryAllocation[];
   @CreateDateColumn() createdAt: Date;
   @UpdateDateColumn() updatedAt: Date;
 }

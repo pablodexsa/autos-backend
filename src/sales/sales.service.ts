@@ -5,7 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, DataSource } from 'typeorm';
+import { Repository, In, DataSource, EntityManager } from 'typeorm';
 import { Sale } from './sale.entity';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { Vehicle } from '../vehicles/vehicle.entity';
@@ -23,6 +23,13 @@ import * as path from 'path';
 import { MailService } from '../mail/mail.service';
 import { SettingsService } from '../settings/settings.service';
 import { LoansService } from '../loans/loans.service';
+import { TreasuryService } from '../treasury/treasury.service';
+import {
+  TreasuryCompany,
+  TreasuryMovementType,
+} from '../treasury/treasury.enums';
+import { Purchase, AcquisitionType } from '../purchases/purchase.entity';
+import { Version } from '../versions/version.entity';
 
 function yyyymmToDate(yyyymm: string, day: number): Date {
   const [y, m] = yyyymm.split('-').map(Number);
@@ -55,8 +62,137 @@ export class SalesService {
     private readonly mailService: MailService,
     private readonly settingsService: SettingsService,
     private readonly loansService: LoansService,
+    private readonly treasuryService: TreasuryService,
     private readonly dataSource: DataSource,
   ) {}
+
+
+  private cashCollectedAtSale(dto: CreateSaleDto, vehiclePrice: number): number {
+    const tradeIn = dto.hasTradeIn ? Number(dto.tradeInValue ?? 0) : 0;
+
+    if (dto.paymentType === 'contado') {
+      return Math.max(vehiclePrice - tradeIn, 0);
+    }
+
+    return Math.max(Number(dto.downPayment ?? 0), 0);
+  }
+
+  private async createTradeInWithManager(
+    manager: EntityManager,
+    dto: CreateSaleDto,
+    sale: Sale,
+    client: Client,
+  ) {
+    if (!dto.hasTradeIn) return null;
+
+    const value = Number(dto.tradeInValue ?? 0);
+    if (value <= 0) {
+      throw new BadRequestException('La permuta debe tener un valor mayor a cero.');
+    }
+
+    if (!dto.tradeInVehicle) {
+      throw new BadRequestException(
+        'Debe completar los datos del vehículo recibido en permuta.',
+      );
+    }
+
+    const data = dto.tradeInVehicle;
+    const version = await manager.findOne(Version, {
+      where: { id: Number(data.versionId) },
+      relations: ['model', 'model.brand'],
+    });
+    if (!version) throw new BadRequestException('Versión de la permuta no encontrada.');
+
+    const plate = String(data.plate || '').trim().toUpperCase();
+    const existingPlate = await manager.findOne(Vehicle, { where: { plate } });
+    if (existingPlate) {
+      throw new BadRequestException(`Ya existe un vehículo con patente ${plate}.`);
+    }
+
+    const tradeVehicle = await manager.save(
+      manager.create(Vehicle, {
+        version,
+        brand: version.model.brand.name,
+        model: version.model.name,
+        versionName: version.name,
+        category: 'CAR',
+        year: Number(data.year),
+        kilometraje: data.kilometraje ?? null,
+        plate,
+        engineNumber: String(data.engineNumber).trim(),
+        chassisNumber: String(data.chassisNumber).trim(),
+        color: String(data.color).trim(),
+        price: value,
+        status: 'available',
+        sold: false,
+        isActive: true,
+        isMotoPlan: false,
+        concesionaria: 'DG',
+        procedencia: 'Propios',
+      } as Partial<Vehicle>),
+    );
+
+    await manager.save(
+      manager.create(Purchase, {
+        vehicle: tradeVehicle,
+        client,
+        acquisitionType: AcquisitionType.TRADE_IN,
+        supplierName: null,
+        relatedSaleId: sale.id,
+        amount: value,
+      }),
+    );
+
+    return tradeVehicle;
+  }
+
+  private async registerInitialTreasuryIncome(
+    manager: EntityManager,
+    dto: CreateSaleDto,
+    sale: Sale,
+    client: Client,
+    vehiclePrice: number,
+    createdBy?: number,
+  ) {
+    const cashAmount = this.cashCollectedAtSale(dto, vehiclePrice);
+    if (cashAmount <= 0) return null;
+
+    if (!createdBy) {
+      throw new BadRequestException('No se pudo identificar el usuario que registra la venta.');
+    }
+
+    const allocations = dto.treasuryAllocations ?? [];
+    const allocationTotal = allocations.reduce(
+      (sum, item) => sum + Number(item.amount || 0),
+      0,
+    );
+
+    if (!allocations.length) {
+      throw new BadRequestException(
+        'Debe indicar en qué cuenta de Tesorería ingresó el cobro inicial.',
+      );
+    }
+
+    if (Math.abs(allocationTotal - cashAmount) > 0.01) {
+      throw new BadRequestException(
+        `La distribución de Tesorería (${allocationTotal}) debe coincidir con el cobro inicial (${cashAmount}).`,
+      );
+    }
+
+    return this.treasuryService.createAutomaticMovementWithAllocations(manager, {
+      company: TreasuryCompany.GL_MOTORS,
+      type: TreasuryMovementType.INCOME,
+      movementDate: dto.saleDate || this.todayDateOnly(),
+      allocations,
+      description: `Cobro inicial venta GL #${sale.id}`,
+      sourceType: 'GL_SALE_INITIAL_PAYMENT',
+      sourceId: sale.id,
+      createdBy,
+      counterparty: `${client.firstName} ${client.lastName}`.trim(),
+      saleId: sale.id,
+      clientId: client.id,
+    });
+  }
 
   // 🔐 Helper: categorías permitidas según permisos del usuario (legacy + scoped)
   private getAllowedCategories(user: any): ('CAR' | 'MOTORCYCLE')[] {
@@ -166,6 +302,7 @@ const availableAll = await this.vehicleRepo.find({
     client: Client,
     dto: CreateSaleDto,
     plan: MotoPlanConfig,
+    manager?: EntityManager,
   ) {
     const paymentDay = Number(dto.paymentDay);
     if (!paymentDay || !dto.initialPaymentMonth) {
@@ -213,7 +350,8 @@ const availableAll = await this.vehicleRepo.find({
           ? firstInstallmentAmount
           : remainingInstallmentAmount;
 
-      const inst = this.instRepo.create({
+      const repo = manager ? manager.getRepository(Installment) : this.instRepo;
+      const inst = repo.create({
         sale,
         saleId: sale.id,
         client,
@@ -229,7 +367,7 @@ const availableAll = await this.vehicleRepo.find({
         receiver: InstallmentReceiver.AGENCY,
       } as Partial<Installment>);
 
-      await this.instRepo.save(inst);
+      await repo.save(inst);
     }
 
     // El anticipo no se genera como cuota.
@@ -372,6 +510,16 @@ const availableAll = await this.vehicleRepo.find({
       vehicle.sold = true;
       await manager.save(vehicle);
 
+      await this.registerInitialTreasuryIncome(
+        manager,
+        dto,
+        savedSale,
+        client,
+        vehiclePrice,
+        sellerId,
+      );
+      await this.createTradeInWithManager(manager, dto, savedSale, client);
+
       return savedSale;
     });
   }
@@ -387,134 +535,150 @@ const availableAll = await this.vehicleRepo.find({
       return this.createKairosFinancedSale(dto, user, sellerId, sellerName);
     }
 
-    const vehicle = await this.vehicleRepo.findOne({
-      where: { id: dto.vehicleId },
-    });
-    if (!vehicle) throw new NotFoundException('Vehicle not found');
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const vehicle = await manager.findOne(Vehicle, {
+        where: { id: dto.vehicleId },
+      });
+      if (!vehicle) throw new NotFoundException('Vehicle not found');
 
-    this.assertCanAccessVehicleCategory(user, (vehicle as any)?.category);
+      this.assertCanAccessVehicleCategory(user, (vehicle as any)?.category);
 
-    const client = await this.clientRepo.findOne({
-      where: { dni: dto.clientDni },
-    });
+      const client = await manager.findOne(Client, {
+        where: { dni: dto.clientDni },
+      });
+      if (!client) throw new NotFoundException('Client not found');
 
-    const inHouseAmount = Number(dto.inHouseAmount ?? 0);
-    const inHouseInstallments = Number(dto.inHouseInstallments ?? 0);
+      const inHouseAmount = Number(dto.inHouseAmount ?? 0);
+      const inHouseInstallments = Number(dto.inHouseInstallments ?? 0);
+      const isMotoPlan = dto.paymentType === 'plan_motos_0km';
 
-    const isMotoPlan = dto.paymentType === 'plan_motos_0km';
+      let motoPlan: MotoPlanConfig | null = null;
+      if (isMotoPlan) {
+        if (!dto.motoPlanCode) {
+          throw new BadRequestException('Debe indicar el código del plan de motos.');
+        }
+        motoPlan = await this.getMotoPlanConfig(dto.motoPlanCode);
+        if (!motoPlan) throw new NotFoundException('Moto plan not found');
+      }
 
-    if (
-      (inHouseAmount > 0 && inHouseInstallments > 0 && !client) ||
-      (isMotoPlan && !client)
-    ) {
-      throw new NotFoundException('Client not found');
-    }
+      const sale = manager.create(Sale, {
+        ...dto,
+        paymentType: dto.paymentType ?? 'contado',
+        motoPlanCode: dto.motoPlanCode ?? null,
+        client,
+        sellerId: sellerId ?? null,
+        sellerName: sellerName ?? null,
+        hasTradeIn: dto.hasTradeIn,
+        tradeInValue: dto.tradeInValue,
+        tradeInPlate: dto.tradeInVehicle?.plate ?? dto.tradeInPlate ?? null,
+        paymentComposition: {
+          hasAdvance: this.cashCollectedAtSale(dto, Number(vehicle.price)) > 0,
+          hasPrendario:
+            (dto.prendarioAmount ?? 0) > 0 &&
+            (dto.prendarioInstallments ?? 0) > 0,
+          hasPersonal:
+            (dto.personalAmount ?? 0) > 0 &&
+            (dto.personalInstallments ?? 0) > 0,
+          hasFinancing:
+            (dto.inHouseAmount ?? 0) > 0 &&
+            (dto.inHouseInstallments ?? 0) > 0,
+        },
+      });
 
-    let motoPlan: MotoPlanConfig | null = null;
-    if (isMotoPlan) {
-      if (!dto.motoPlanCode) {
-        throw new BadRequestException(
-          'Debe indicar el código del plan de motos.',
+      const savedSale = await manager.save(sale);
+
+      vehicle.status = 'Sold';
+      vehicle.sold = true;
+      await manager.save(vehicle);
+
+      const planRatePercent =
+        Number(dto.inHouseMonthlyRate ?? 0) ||
+        (await this.getRate('financiacion', inHouseInstallments));
+
+      const totalWithInterest =
+        planRatePercent > 0
+          ? inHouseAmount * (1 + planRatePercent / 100)
+          : inHouseAmount;
+
+      const installmentValue =
+        inHouseInstallments > 0
+          ? parseFloat((totalWithInterest / inHouseInstallments).toFixed(2))
+          : 0;
+
+      if (
+        dto.paymentType !== 'plan_motos_0km' &&
+        inHouseAmount > 0 &&
+        inHouseInstallments > 0
+      ) {
+        const baseDate = yyyymmToDate(dto.initialPaymentMonth, dto.paymentDay);
+        const repo = manager.getRepository(Installment);
+
+        for (let i = 0; i < inHouseInstallments; i++) {
+          const due = new Date(
+            baseDate.getFullYear(),
+            baseDate.getMonth() + i,
+            dto.paymentDay,
+            12,
+            0,
+            0,
+          );
+
+          const inst = repo.create({
+            sale: savedSale,
+            saleId: savedSale.id,
+            client,
+            clientId: client.id,
+            concept: 'PERSONAL_FINANCING',
+            amount: installmentValue,
+            remainingAmount: installmentValue,
+            dueDate: due,
+            paid: false,
+            status: InstallmentStatus.PENDING,
+            installmentNumber: i + 1,
+            totalInstallments: inHouseInstallments,
+            receiver: InstallmentReceiver.AGENCY,
+          } as Partial<Installment>);
+
+          await repo.save(inst);
+        }
+      }
+
+      if (isMotoPlan && motoPlan) {
+        await this.createMotoPlanInstallments(
+          savedSale,
+          client,
+          dto,
+          motoPlan,
+          manager,
         );
       }
 
-      motoPlan = await this.getMotoPlanConfig(dto.motoPlanCode);
-      if (!motoPlan) {
-        throw new NotFoundException('Moto plan not found');
-      }
-    }
+      await this.registerInitialTreasuryIncome(
+        manager,
+        dto,
+        savedSale,
+        client,
+        Number(vehicle.price ?? dto.basePrice ?? 0),
+        sellerId,
+      );
 
-    const sale = this.salesRepo.create({
-      ...dto,
-      paymentType: dto.paymentType ?? 'contado',
-      motoPlanCode: dto.motoPlanCode ?? null,
-      client: client ?? undefined,
+      await this.createTradeInWithManager(
+        manager,
+        dto,
+        savedSale,
+        client,
+      );
 
-      sellerId: sellerId ?? null,
-      sellerName: sellerName ?? null,
-
-      hasTradeIn: dto.hasTradeIn,
-      tradeInValue: dto.tradeInValue,
-      tradeInPlate: dto.tradeInPlate ?? null,
-
-      paymentComposition: {
-        hasAdvance: (dto.downPayment ?? 0) > 0,
-        hasPrendario:
-          (dto.prendarioAmount ?? 0) > 0 &&
-          (dto.prendarioInstallments ?? 0) > 0,
-        hasPersonal:
-          (dto.personalAmount ?? 0) > 0 &&
-          (dto.personalInstallments ?? 0) > 0,
-        hasFinancing:
-          (dto.inHouseAmount ?? 0) > 0 &&
-          (dto.inHouseInstallments ?? 0) > 0,
-      },
+      return savedSale;
     });
-
-    const saved = await this.salesRepo.save(sale);
-    vehicle.status = 'Sold';
-    await this.vehicleRepo.save(vehicle);
-
-    // 💳 Generar cuotas de financiación personal
-    const planRatePercent =
-      Number(dto.inHouseMonthlyRate ?? 0) ||
-      (await this.getRate('financiacion', inHouseInstallments));
-
-    const totalWithInterest =
-      planRatePercent > 0
-        ? inHouseAmount * (1 + planRatePercent / 100)
-        : inHouseAmount;
-
-    const installmentValue =
-      inHouseInstallments > 0
-        ? parseFloat((totalWithInterest / inHouseInstallments).toFixed(2))
-        : 0;
-
-    if (
-      dto.paymentType !== 'plan_motos_0km' &&
-      inHouseAmount > 0 &&
-      inHouseInstallments > 0
-    ) {
-      const baseDate = yyyymmToDate(dto.initialPaymentMonth, dto.paymentDay);
-
-      for (let i = 0; i < inHouseInstallments; i++) {
-        const due = new Date(
-          baseDate.getFullYear(),
-          baseDate.getMonth() + i,
-          dto.paymentDay,
-          12,
-          0,
-          0,
-        );
-
-        const inst = this.instRepo.create({
-          sale: saved,
-          saleId: saved.id,
-          client: client!,
-          clientId: client!.id,
-          concept: 'PERSONAL_FINANCING',
-          amount: installmentValue,
-          remainingAmount: installmentValue,
-          dueDate: due,
-          paid: false,
-          status: InstallmentStatus.PENDING,
-          installmentNumber: i + 1,
-          totalInstallments: inHouseInstallments,
-          receiver: InstallmentReceiver.AGENCY,
-        } as Partial<Installment>);
-
-        await this.instRepo.save(inst);
-      }
-    }
-
-    // 🏍️ Generar cuotas del plan motos
-    if (isMotoPlan && client && motoPlan) {
-      await this.createMotoPlanInstallments(saved, client, dto, motoPlan);
-    }
 
     try {
-      const clientEmail =
-        (saved as any)?.client?.email || (client as any)?.email;
+const savedWithClient = await this.salesRepo.findOne({
+  where: { id: saved.id },
+  relations: ['client'],
+});
+
+const clientEmail = (savedWithClient as any)?.client?.email;
 
       if (clientEmail) {
         const pdfBuffer = await this.getPdf(saved.id);

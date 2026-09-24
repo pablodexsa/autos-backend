@@ -1,20 +1,17 @@
-﻿import {
+import {
   Controller,
   Get,
   Post,
   Param,
   Body,
-  UploadedFile,
-  UseInterceptors,
   Res,
   ParseIntPipe,
   Delete,
   NotFoundException,
   UseGuards,
+  BadRequestException,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import type { Express, Response } from 'express';
+import type { Response } from 'express';
 import * as path from 'path';
 import * as fs from 'fs';
 import PDFDocument from 'pdfkit';
@@ -39,35 +36,18 @@ export class InstallmentPaymentController {
 
   @UseGuards(JwtAuthGuard)
   @Post()
-  @UseInterceptors(
-    FileInterceptor('file', {
-      storage: diskStorage({
-        destination: './uploads/receipts',
-        filename: (req, file, cb) => {
-          const uniqueName = `${Date.now()}_${file.originalname}`;
-          cb(null, uniqueName);
-        },
-      }),
-    }),
-  )
-  async create(@Body() body: any, @UploadedFile() file?: Express.Multer.File) {
-    const dto: any = {
-      installmentId: Number(body.installmentId),
-      amount: Number(body.amount),
-      paymentDate: body.paymentDate,
-    };
-
-    if (file && file.filename) {
-      dto.receiptPath = `uploads/receipts/${file.filename}`;
-    }
-
-    return this.paymentService.create(dto);
+  create() {
+    throw new BadRequestException(
+      'El alta directa de pagos está deshabilitada. Registre el cobro mediante /installments/:id/register-payment.',
+    );
   }
 
   @UseGuards(JwtAuthGuard)
   @Delete(':id')
-  remove(@Param('id', ParseIntPipe) id: number) {
-    return this.paymentService.remove(id);
+  remove(@Param('id', ParseIntPipe) _id: number) {
+    throw new BadRequestException(
+      'La eliminación directa de pagos está deshabilitada para preservar Tesorería y auditoría.',
+    );
   }
 
   @Get(':id/receipt')

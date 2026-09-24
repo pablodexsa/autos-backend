@@ -15,6 +15,7 @@ import { AuditModule } from '../audit/audit.module'; // 👈 NUEVO
 import { MailModule } from '../mail/mail.module'; // ✅ NUEVO
 import { SettingsModule } from '../settings/settings.module';
 import { LoansModule } from '../loans/loans.module';
+import { TreasuryModule } from '../treasury/treasury.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { LoansModule } from '../loans/loans.module';
     MailModule, // ✅ para poder inyectar MailService en SalesService
     SettingsModule,
     forwardRef(() => LoansModule),
+    TreasuryModule,
   ],
   controllers: [SalesController],
   providers: [SalesService],

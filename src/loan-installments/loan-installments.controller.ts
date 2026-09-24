@@ -5,6 +5,7 @@ import {
   Patch,
   ParseIntPipe,
   Body,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -32,12 +33,16 @@ export class LoanInstallmentsController {
   registerPayment(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: ApplyLoanInstallmentPaymentDto,
+    @Req() req: any,
   ) {
     return this.loanInstallmentsService.applyPaymentToInstallment(
       id,
       dto.amount,
       dto.paymentDate,
       dto.observations,
+      dto.treasuryAccountId,
+      dto.treasuryPaymentMethod,
+      req.user.id,
     );
   }
 }

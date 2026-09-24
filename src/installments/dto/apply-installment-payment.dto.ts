@@ -1,4 +1,5 @@
-import { IsNumber, IsDateString, IsOptional, IsString, IsEnum } from 'class-validator';
+import { IsNumber, IsDateString, IsOptional, IsString, IsEnum, IsInt, Min } from 'class-validator';
+import { TreasuryPaymentMethod } from '../../treasury/treasury.enums';
 import { InstallmentReceiver } from '../installment.entity';
 
 export class ApplyInstallmentPaymentDto {
@@ -14,4 +15,7 @@ export class ApplyInstallmentPaymentDto {
   @IsOptional()
   @IsString()
   observations?: string;
+
+  @IsInt() @Min(1) treasuryAccountId: number;
+  @IsEnum(TreasuryPaymentMethod) treasuryPaymentMethod: TreasuryPaymentMethod;
 }

@@ -26,6 +26,7 @@ async function bootstrap() {
   // CORS robusto: permite localhost + tu frontend en Render + cualquier subdominio *.onrender.com
   const allowList = new Set<string>([
     'http://localhost:5173',
+    'http://localhost:5174',
     'https://autos-frontend.onrender.com',
   ]);
 

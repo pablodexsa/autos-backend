@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import { TreasuryAccount } from './treasury-account.entity';
 import { TreasuryAllocation } from './treasury-allocation.entity';
 import { TreasuryCategory } from './treasury-category.entity';
@@ -17,6 +17,179 @@ export class TreasuryService {
     @InjectRepository(TreasuryAllocation) private allocations: Repository<TreasuryAllocation>,
     private dataSource: DataSource,
   ) {}
+
+
+  async createAutomaticMovement(
+    manager: EntityManager,
+    params: {
+      company: TreasuryCompany;
+      type: TreasuryMovementType.INCOME | TreasuryMovementType.EXPENSE;
+      movementDate: string;
+      amount: number;
+      accountId: number;
+      paymentMethod: TreasuryPaymentMethod;
+      description: string;
+      sourceType: string;
+      sourceId: number;
+      createdBy: number;
+      reference?: string | null;
+      counterparty?: string | null;
+      loanId?: number | null;
+      installmentId?: number | null;
+      paymentId?: number | null;
+      saleId?: number | null;
+      clientId?: number | null;
+    },
+  ) {
+    const existing = await manager.findOne(TreasuryMovement, {
+      where: { sourceType: params.sourceType, sourceId: params.sourceId },
+    });
+    if (existing) return existing;
+
+    if (!params.accountId || !Number.isInteger(Number(params.accountId))) {
+      throw new BadRequestException('Debe seleccionar una cuenta de Tesorería');
+    }
+
+    const account = await manager.findOne(TreasuryAccount, { where: { id: Number(params.accountId) } });
+    if (!account || !account.isActive) throw new BadRequestException('La cuenta de Tesorería seleccionada no existe o está inactiva');
+    if (account.company !== params.company) throw new BadRequestException('La cuenta de Tesorería no pertenece a la empresa de la operación');
+
+    const amount = Math.abs(Number(params.amount));
+    if (!Number.isFinite(amount) || amount <= 0) throw new BadRequestException('El importe de Tesorería debe ser mayor a cero');
+
+    const movement = await manager.save(manager.create(TreasuryMovement, {
+      company: params.company, type: params.type, movementDate: params.movementDate,
+      totalAmount: amount, categoryId: null, counterparty: params.counterparty ?? null,
+      description: params.description, reference: params.reference ?? null,
+      sourceType: params.sourceType, sourceId: params.sourceId,
+      loanId: params.loanId ?? null, installmentId: params.installmentId ?? null,
+      paymentId: params.paymentId ?? null, saleId: params.saleId ?? null,
+      clientId: params.clientId ?? null, attachmentPath: null, createdBy: params.createdBy,
+    }));
+
+    const sign = params.type === TreasuryMovementType.EXPENSE ? -1 : 1;
+    await manager.save(manager.create(TreasuryAllocation, {
+      movementId: movement.id, accountId: account.id, amount: sign * amount,
+      paymentMethod: params.paymentMethod, reference: params.reference ?? null,
+    }));
+    return movement;
+  }
+
+
+  async createAutomaticMovementWithAllocations(
+    manager: EntityManager,
+    params: {
+      company: TreasuryCompany;
+      type: TreasuryMovementType.INCOME | TreasuryMovementType.EXPENSE;
+      movementDate: string;
+      allocations: Array<{
+        accountId: number;
+        amount: number;
+        paymentMethod: TreasuryPaymentMethod;
+        reference?: string | null;
+      }>;
+      description: string;
+      sourceType: string;
+      sourceId: number;
+      createdBy: number;
+      reference?: string | null;
+      counterparty?: string | null;
+      loanId?: number | null;
+      installmentId?: number | null;
+      paymentId?: number | null;
+      saleId?: number | null;
+      clientId?: number | null;
+    },
+  ) {
+    const existing = await manager.findOne(TreasuryMovement, {
+      where: { sourceType: params.sourceType, sourceId: params.sourceId },
+      relations: { allocations: true },
+    });
+    if (existing) return existing;
+
+    if (!Array.isArray(params.allocations) || params.allocations.length === 0) {
+      throw new BadRequestException('Debe indicar al menos una cuenta de Tesorería');
+    }
+
+    const normalized = params.allocations.map((item) => ({
+      accountId: Number(item.accountId),
+      amount: Math.abs(Number(item.amount)),
+      paymentMethod: item.paymentMethod,
+      reference: item.reference ?? null,
+    }));
+
+    if (
+      normalized.some(
+        (item) =>
+          !Number.isInteger(item.accountId) ||
+          item.accountId <= 0 ||
+          !Number.isFinite(item.amount) ||
+          item.amount <= 0,
+      )
+    ) {
+      throw new BadRequestException('La distribución de Tesorería contiene datos inválidos');
+    }
+
+    const accountIds = [...new Set(normalized.map((item) => item.accountId))];
+    const accounts = await manager
+      .createQueryBuilder(TreasuryAccount, 'account')
+      .where('account.id IN (:...accountIds)', { accountIds })
+      .getMany();
+
+    if (accounts.length !== accountIds.length) {
+      throw new BadRequestException('Una o más cuentas de Tesorería no existen');
+    }
+    if (accounts.some((account) => !account.isActive)) {
+      throw new BadRequestException('Una o más cuentas de Tesorería están inactivas');
+    }
+    if (accounts.some((account) => account.company !== params.company)) {
+      throw new BadRequestException(
+        'Todas las cuentas de Tesorería deben pertenecer a la empresa de la operación',
+      );
+    }
+
+    const totalAmount = normalized.reduce((sum, item) => sum + item.amount, 0);
+    const movement = await manager.save(
+      manager.create(TreasuryMovement, {
+        company: params.company,
+        type: params.type,
+        movementDate: params.movementDate,
+        totalAmount,
+        categoryId: null,
+        counterparty: params.counterparty ?? null,
+        description: params.description,
+        reference: params.reference ?? null,
+        sourceType: params.sourceType,
+        sourceId: params.sourceId,
+        loanId: params.loanId ?? null,
+        installmentId: params.installmentId ?? null,
+        paymentId: params.paymentId ?? null,
+        saleId: params.saleId ?? null,
+        clientId: params.clientId ?? null,
+        attachmentPath: null,
+        createdBy: params.createdBy,
+      }),
+    );
+
+    const sign = params.type === TreasuryMovementType.EXPENSE ? -1 : 1;
+    await manager.save(
+      TreasuryAllocation,
+      normalized.map((item) =>
+        manager.create(TreasuryAllocation, {
+          movementId: movement.id,
+          accountId: item.accountId,
+          amount: sign * item.amount,
+          paymentMethod: item.paymentMethod,
+          reference: item.reference ?? params.reference ?? null,
+        }),
+      ),
+    );
+
+    return manager.findOne(TreasuryMovement, {
+      where: { id: movement.id },
+      relations: { allocations: true },
+    });
+  }
 
   createAccount(dto: CreateTreasuryAccountDto) { return this.accounts.save(this.accounts.create({ ...dto, currency: dto.currency || 'ARS' })); }
   findAccounts(company?: TreasuryCompany, includeInactive = false) {
@@ -52,7 +225,28 @@ export class TreasuryService {
     if (total <= 0) throw new BadRequestException('El importe total debe ser mayor a cero');
     const sign = dto.type === TreasuryMovementType.EXPENSE ? -1 : 1;
     return this.dataSource.transaction(async manager => {
-      const m = manager.create(TreasuryMovement, { ...dto, totalAmount: total, createdBy: userId, attachmentPath: attachmentPath || null, categoryId: dto.categoryId || null, counterparty: dto.counterparty || null, reference: dto.reference || null, sourceType: dto.sourceType || null, sourceId: dto.sourceId || null, loanId: dto.loanId || null, installmentId: dto.installmentId || null, paymentId: dto.paymentId || null, saleId: dto.saleId || null, clientId: dto.clientId || null });
+      // IMPORTANT: do not spread dto here. dto contains `allocations` and the
+      // movement relation used to have cascade enabled; spreading it caused TypeORM
+      // to persist the raw allocations once and the signed ledger allocations again.
+      const m = manager.create(TreasuryMovement, {
+        company: dto.company,
+        type: dto.type,
+        movementDate: dto.movementDate,
+        totalAmount: total,
+        createdBy: userId,
+        attachmentPath: attachmentPath || null,
+        categoryId: dto.categoryId || null,
+        description: dto.description,
+        counterparty: dto.counterparty || null,
+        reference: dto.reference || null,
+        sourceType: dto.sourceType || null,
+        sourceId: dto.sourceId || null,
+        loanId: dto.loanId || null,
+        installmentId: dto.installmentId || null,
+        paymentId: dto.paymentId || null,
+        saleId: dto.saleId || null,
+        clientId: dto.clientId || null,
+      });
       const saved = await manager.save(m);
       await manager.save(TreasuryAllocation, dto.allocations.map(a => manager.create(TreasuryAllocation, { movementId: saved.id, accountId: a.accountId, amount: sign * Number(a.amount), paymentMethod: a.paymentMethod || TreasuryPaymentMethod.OTHER, reference: a.reference || null })));
       return manager.findOne(TreasuryMovement, { where: { id: saved.id }, relations: { allocations: true } });
@@ -74,13 +268,29 @@ export class TreasuryService {
   }
 
   async openingBalance(dto: OpeningBalanceDto, userId: number) {
-    const a = await this.accounts.findOneBy({ id: dto.accountId }); if (!a) throw new NotFoundException('Cuenta no encontrada');
-    return this.createMovement({ company: a.company, type: TreasuryMovementType.OPENING_BALANCE, movementDate: dto.movementDate, description: dto.description || `Saldo inicial - ${a.name}`, allocations: [{ accountId: a.id, amount: Math.abs(Number(dto.amount)), paymentMethod: TreasuryPaymentMethod.OTHER }] }, userId).then(async m => {
-      if (Number(dto.amount) < 0 && m) { await this.allocations.update({ movementId: m.id }, { amount: -Math.abs(Number(dto.amount)) }); await this.movements.update(m.id, { totalAmount: Math.abs(Number(dto.amount)) }); }
-      return this.movements.findOne({ where: { id: m!.id }, relations: { allocations: true } });
+    const account = await this.accounts.findOneBy({ id: dto.accountId });
+    if (!account) throw new NotFoundException('Cuenta no encontrada');
+    const amount = Number(dto.amount);
+    if (!Number.isFinite(amount) || amount === 0) throw new BadRequestException('El saldo inicial no puede ser cero');
+
+    return this.dataSource.transaction(async manager => {
+      const movement = await manager.save(manager.create(TreasuryMovement, {
+        company: account.company,
+        type: TreasuryMovementType.OPENING_BALANCE,
+        movementDate: dto.movementDate,
+        totalAmount: Math.abs(amount),
+        description: dto.description || `Saldo inicial - ${account.name}`,
+        createdBy: userId,
+      }));
+      await manager.save(manager.create(TreasuryAllocation, {
+        movementId: movement.id,
+        accountId: account.id,
+        amount,
+        paymentMethod: TreasuryPaymentMethod.OTHER,
+      }));
+      return manager.findOne(TreasuryMovement, { where: { id: movement.id }, relations: { allocations: true } });
     });
   }
-
 
   async attachFile(id: number, attachmentPath: string) {
     const m = await this.movements.findOneBy({ id });

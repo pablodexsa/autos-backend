@@ -3,9 +3,11 @@ import {
   IsInt,
   IsNumber,
   IsString,
+  IsEnum,
   Max,
   Min,
 } from 'class-validator';
+import { TreasuryPaymentMethod } from '../../treasury/treasury.enums';
 
 export class CreateLoanDto {
   @IsString()
@@ -22,4 +24,7 @@ export class CreateLoanDto {
   @Min(1)
   @Max(12)
   weeklyInstallments: number;
+
+  @IsInt() @Min(1) treasuryAccountId: number;
+  @IsEnum(TreasuryPaymentMethod) treasuryPaymentMethod: TreasuryPaymentMethod;
 }

@@ -7,6 +7,7 @@ import {
   ParseIntPipe,
   Res,
   UseGuards,
+  Req,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -26,8 +27,8 @@ export class LoansController {
 
   @Post()
   @UseGuards(JwtAuthGuard)
-  create(@Body() dto: CreateLoanDto) {
-    return this.loansService.create(dto);
+  create(@Body() dto: CreateLoanDto, @Req() req: any) {
+    return this.loansService.create(dto, req.user.id);
   }
 
   @Get()

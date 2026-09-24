@@ -1,4 +1,4 @@
-﻿import { Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { InstallmentsService } from './installments.service';
 import { InstallmentsController } from './installments.controller';
@@ -7,6 +7,7 @@ import { InstallmentPayment } from '../installment-payments/installment-payment.
 import { Sale } from '../sales/sale.entity';
 import { Client } from '../clients/entities/client.entity';
 import { AuditModule } from '../audit/audit.module';
+import { TreasuryModule } from '../treasury/treasury.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { AuditModule } from '../audit/audit.module';
       Sale,
       Client,
     ]),
+    TreasuryModule,
     AuditModule,
   ],
   controllers: [InstallmentsController],

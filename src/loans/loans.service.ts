@@ -29,6 +29,11 @@ import {
   CashBoxMovementType,
   CashBoxType,
 } from '../cash-box-movements/cash-box-movement.entity';
+import { TreasuryService } from '../treasury/treasury.service';
+import {
+  TreasuryCompany,
+  TreasuryMovementType,
+} from '../treasury/treasury.enums';
 
 @Injectable()
 export class LoansService {
@@ -48,6 +53,7 @@ export class LoansService {
     private readonly fundMovementsRepo: Repository<LoanFundMovement>,
 
     private readonly dataSource: DataSource,
+    private readonly treasuryService: TreasuryService,
   ) {}
 
   private parseLocalDate(value: string | Date): Date {
@@ -393,7 +399,7 @@ export class LoansService {
     });
   }
 
-  async create(dto: CreateLoanDto): Promise<Loan> {
+  async create(dto: CreateLoanDto, userId: number): Promise<Loan> {
     const preview = await this.preview(dto);
 
     if (!preview.canCreate) {
@@ -479,6 +485,16 @@ export class LoansService {
       });
 
       await manager.save(movement);
+
+      await this.treasuryService.createAutomaticMovement(manager, {
+        company: TreasuryCompany.KAIROS, type: TreasuryMovementType.EXPENSE,
+        movementDate: dto.requestDate, amount: values.requestedAmount,
+        accountId: dto.treasuryAccountId, paymentMethod: dto.treasuryPaymentMethod,
+        description: `Desembolso préstamo Kairos #${savedLoan.id} - ${savedLoan.clientName}`,
+        sourceType: 'LOAN_DISBURSEMENT', sourceId: savedLoan.id, createdBy: userId,
+        reference: `Préstamo #${savedLoan.id}`, counterparty: savedLoan.clientName,
+        loanId: savedLoan.id, clientId: savedLoan.clientId,
+      });
 
       return savedLoan;
     });

@@ -1,4 +1,4 @@
-﻿import {
+import {
   Controller,
   Get,
   Param,
@@ -6,7 +6,9 @@
   Delete,
   ParseIntPipe,
   Body,
+  Req,
   UseGuards,
+  BadRequestException,
 } from '@nestjs/common';
 import { InstallmentsService } from './installments.service';
 import { ApiTags } from '@nestjs/swagger';
@@ -36,6 +38,7 @@ export class InstallmentsController {
   registerPayment(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: ApplyInstallmentPaymentDto,
+    @Req() req: any,
   ) {
     return this.installmentsService.applyPaymentToInstallment(
       id,
@@ -43,24 +46,35 @@ export class InstallmentsController {
       dto.paymentDate,
       dto.receiver,
       dto.observations,
+      dto.treasuryAccountId,
+      dto.treasuryPaymentMethod,
+      req.user.id,
     );
   }
 
-  // Marca como pagada de forma directa (sigue disponible)
+  // Legacy bloqueado: un cobro debe pasar por register-payment para mantener
+  // cuota + pago + Tesorería dentro del mismo circuito.
   @Patch(':id/pay')
-  markAsPaid(@Param('id', ParseIntPipe) id: number) {
-    return this.installmentsService.markAsPaid(id);
+  markAsPaid(@Param('id', ParseIntPipe) _id: number) {
+    throw new BadRequestException(
+      'Endpoint legacy deshabilitado. Registre el cobro mediante /installments/:id/register-payment.',
+    );
   }
 
-  // Revertir pago y volver a pendiente
+  // Legacy bloqueado: una anulación requiere un circuito contable que revierta
+  // también el pago y el movimiento de Tesorería.
   @Patch(':id/unpay')
-  markAsUnpaid(@Param('id', ParseIntPipe) id: number) {
-    return this.installmentsService.markAsUnpaid(id);
+  markAsUnpaid(@Param('id', ParseIntPipe) _id: number) {
+    throw new BadRequestException(
+      'La reversión directa de cuotas está deshabilitada. Debe utilizarse un circuito de anulación contable.',
+    );
   }
 
-  // 🗑️ Eliminar cuota
+  // Legacy bloqueado: no borrar cuotas que puedan tener pagos/Tesorería asociados.
   @Delete(':id')
-  remove(@Param('id', ParseIntPipe) id: number) {
-    return this.installmentsService.remove(id);
+  remove(@Param('id', ParseIntPipe) _id: number) {
+    throw new BadRequestException(
+      'La eliminación directa de cuotas está deshabilitada para preservar pagos, Tesorería y auditoría.',
+    );
   }
 }
